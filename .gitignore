@@ -1,0 +1,81 @@
+# Dependencies
+node_modules/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.env.local
+*.env.*.local
+
+# Production and build output
+dist/
+build/
+out/
+coverage/
+.vite/
+.cache/
+.nyc_output/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Temporary files
+.tmp/
+tmp/
+temp/
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Local databases and runtime storage
+*.sqlite
+*.sqlite3
+*.db
+backend/storage/
+
+# Certificates and private keys
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# Archives and backups
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bak
+*.backup
+
+# IDE and editor files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.iml
+
+# Operating system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Frontend tooling
+.eslintcache
+vite.config.*.timestamp-*
+
+# Test artifacts
+playwright-report/
+test-results/
