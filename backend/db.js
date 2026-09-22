@@ -74,5 +74,6 @@ function run(sql, params = []) { return new Promise((resolve, reject) => databas
 function get(sql, params = []) { return new Promise((resolve, reject) => database.get(sql, params, (error, row) => error ? reject(error) : resolve(row))) }
 function all(sql, params = []) { return new Promise((resolve, reject) => database.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows))) }
 function transaction(callback) { return run('BEGIN').then(() => callback()).then((result) => run('COMMIT').then(() => result)).catch((error) => run('ROLLBACK').then(() => { throw error })) }
+function close() { return new Promise((resolve, reject) => database.close((error) => error ? reject(error) : resolve())) }
 
-module.exports = { run, get, all, transaction }
+module.exports = { run, get, all, transaction, close }

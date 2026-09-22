@@ -14,7 +14,9 @@ const app = express()
 const port = process.env.PORT || 3333
 const isProduction = process.env.NODE_ENV === 'production'
 const jwtSecret = process.env.NEXORA_JWT_SECRET || (!isProduction ? 'nexora-development-secret-change-me' : (() => { throw new Error('NEXORA_JWT_SECRET deve ser configurado em produção.') })())
-app.use(cors())
+const frontendOrigin = process.env.FRONTEND_ORIGIN
+if (isProduction && !frontendOrigin) throw new Error('FRONTEND_ORIGIN deve ser configurado em produção.')
+app.use(cors(isProduction ? { origin: frontendOrigin, credentials: false } : { origin: true }))
 app.use(express.json({ limit: '2mb' }))
 const id = () => crypto.randomUUID()
 const tokenFor = (user) => jwt.sign({ userId: user.id, companyId: user.company_id, role: user.role }, jwtSecret, { expiresIn: '12h' })
@@ -467,5 +469,20 @@ app.get('/api/access-audit', auth, requireAdministrator, async (request, respons
 
 app.use(createCrudRoutes({ db, auth, requireRole, audit }))
 
-if (require.main === module) app.listen(port, () => console.log(`Nexora API running at http://localhost:${port}`))
+if (require.main === module) {
+  const server = app.listen(port, () => console.log(`Nexora API running on port ${port}`))
+  let shuttingDown = false
+  const shutdown = (signal) => {
+    if (shuttingDown) return
+    shuttingDown = true
+    console.log(`Nexora API shutting down (${signal})`)
+    server.close(async (error) => {
+      if (error) { console.error('HTTP server shutdown error:', error.message); process.exitCode = 1 }
+      try { await db.close() } catch (dbError) { console.error('Database shutdown error:', dbError.message); process.exitCode = 1 }
+      process.exit()
+    })
+  }
+  process.on('SIGTERM', () => shutdown('SIGTERM'))
+  process.on('SIGINT', () => shutdown('SIGINT'))
+}
 module.exports = { app }

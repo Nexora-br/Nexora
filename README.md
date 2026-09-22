@@ -25,6 +25,32 @@ npm --prefix F:\Nexora\frontend run dev
 API: `http://localhost:3333`
 Frontend: endereço exibido pelo Vite, normalmente `http://localhost:5173`
 
+## Deploy
+
+- Frontend: Vercel.
+- Backend: Render como serviço Node.js usando `npm start`.
+- Banco: SQLite atual em Persistent Disk do Render; não usar múltiplas instâncias sem migrar para PostgreSQL.
+- Uploads: `backend/storage/<company_id>` no mesmo Persistent Disk.
+
+Variáveis de ambiente do backend:
+
+```text
+NODE_ENV=production
+PORT=10000
+NEXORA_JWT_SECRET=<segredo forte configurado no painel do Render>
+FRONTEND_ORIGIN=https://<seu-frontend>.vercel.app
+AI_PROVIDER=puter
+AI_API_KEY=
+```
+
+Variável de ambiente do frontend na Vercel:
+
+```text
+VITE_API_URL=https://<seu-backend>.onrender.com/api
+```
+
+O valor de `NEXORA_JWT_SECRET` deve ser criado somente no painel do Render. Não publique segredos no repositório.
+
 A API possui autenticação em `/api/auth`, dashboard e projetos protegidos por JWT, clientes, busca global e auditoria. A Fase 3 adiciona CRUDs protegidos para produtos, categorias, locais, fornecedores, compras, contas a pagar/receber, transações, centros de custo, funcionários, equipamentos, contratos, orçamentos, documentos, agenda, notificações e manutenção.
 
 ## Fase 4
