@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Eye, Pencil, Plus, RefreshCw, Search, X } from 'lucide-react'
 import './AppNew.css'
 
-const API_URL = 'http://localhost:3333/api'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333/api'
 const statuses = { PENDENTE: 'Pendente', EM_ANDAMENTO: 'Em andamento', CONCLUIDA: 'Concluída', CANCELADA: 'Cancelada' }
 const priorities = { BAIXA: 'Baixa', MEDIA: 'Média', ALTA: 'Alta', URGENTE: 'Urgente' }
 

@@ -12,7 +12,7 @@ import { AdminPage } from './AdminPage'
 import { TasksPage } from './TasksPage'
 import { ProjectsPage } from './ProjectsPage'
 
-const API_URL = 'http://localhost:3333/api'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333/api'
 const menuItems = [
   { label: 'Visão geral', icon: LayoutDashboard }, { label: 'Projetos e obras', icon: Factory },
   { label: 'Tarefas', icon: ClipboardList }, { label: 'Agenda de campo', icon: CalendarDays },

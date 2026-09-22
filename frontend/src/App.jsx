@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bell, CalendarDays, ChevronDown, CircleHelp, ClipboardList, CloudSun, Factory, LayoutDashboard, Menu, Package, Plus, Search, Settings2, Truck, Users, Warehouse, X } from 'lucide-react'
 import './App.css'
 
-const API_URL = 'http://localhost:3333/api'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333/api'
 const fallbackData = {
   stats: [
     { label: 'Projetos em andamento', value: '12', detail: '+2 este mês', tone: 'blue', icon: Factory },
