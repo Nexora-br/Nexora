@@ -1,7 +1,7 @@
 const path = require('path')
 const sqlite3 = require('sqlite3').verbose()
 
-const database = new sqlite3.Database(path.join(__dirname, 'nexora.sqlite'))
+const database = new sqlite3.Database(process.env.NEXORA_DB_PATH || path.join(__dirname, 'nexora.sqlite'))
 
 database.exec(`
 PRAGMA foreign_keys = ON;

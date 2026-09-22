@@ -15,7 +15,6 @@ const port = process.env.PORT || 3333
 const isProduction = process.env.NODE_ENV === 'production'
 const jwtSecret = process.env.NEXORA_JWT_SECRET || (!isProduction ? 'nexora-development-secret-change-me' : (() => { throw new Error('NEXORA_JWT_SECRET deve ser configurado em produção.') })())
 const frontendOrigin = process.env.FRONTEND_ORIGIN
-if (isProduction && !frontendOrigin) throw new Error('FRONTEND_ORIGIN deve ser configurado em produção.')
 app.use(cors(isProduction ? { origin: frontendOrigin, credentials: false } : { origin: true }))
 app.use(express.json({ limit: '2mb' }))
 const id = () => crypto.randomUUID()
@@ -25,7 +24,8 @@ const sortFor = (request, fields, fallback = 'created_at') => ({ field: fields.i
 async function permissionsFor(user) { if (user.role === 'ADMINISTRADOR') return ['*.*']; const rows = await db.all('SELECT p.module, p.action FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id JOIN user_roles ur ON ur.role_id = rp.role_id WHERE ur.user_id = ?', [user.id]); return rows.map((row) => `${row.module}.${row.action}`) }
 const cleanUser = (user, permissions = user.permissions || []) => ({ id: user.id, name: user.name, email: user.email, companyId: user.company_id, role: user.role, permissions })
 const errorResponse = (response, error) => { console.error(error); response.status(500).json({ error: 'Não foi possível concluir a operação.' }) }
-const upload = multer({ storage: multer.diskStorage({ destination: (request, _file, callback) => { const directory = path.join(__dirname, 'storage', request.user.company_id); fs.mkdirSync(directory, { recursive: true }); callback(null, directory) }, filename: (_request, file, callback) => callback(null, `${crypto.randomUUID()}${path.extname(file.originalname).toLowerCase()}`) }), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, ['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(file.mimetype)) })
+const uploadRoot = process.env.NEXORA_STORAGE_PATH || path.join(__dirname, 'storage')
+const upload = multer({ storage: multer.diskStorage({ destination: (request, _file, callback) => { const directory = path.join(uploadRoot, request.user.company_id); fs.mkdirSync(directory, { recursive: true }); callback(null, directory) }, filename: (_request, file, callback) => callback(null, `${crypto.randomUUID()}${path.extname(file.originalname).toLowerCase()}`) }), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, ['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(file.mimetype)) })
 
 async function auth(request, response, next) {
   try {
@@ -470,6 +470,7 @@ app.get('/api/access-audit', auth, requireAdministrator, async (request, respons
 app.use(createCrudRoutes({ db, auth, requireRole, audit }))
 
 if (require.main === module) {
+  if (isProduction && !frontendOrigin) throw new Error('FRONTEND_ORIGIN deve ser configurado em produção.')
   const server = app.listen(port, () => console.log(`Nexora API running on port ${port}`))
   let shuttingDown = false
   const shutdown = (signal) => {

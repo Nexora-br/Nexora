@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: nexora-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: NEXORA_JWT_SECRET
+        sync: false
+      - key: NEXORA_DB_PATH
+        value: /var/data/nexora.sqlite
+      - key: NEXORA_STORAGE_PATH
+        value: /var/data/storage
+      - key: AI_PROVIDER
+        value: puter
+      - key: AI_API_KEY
+        sync: false
+    disk:
+      name: nexora-data
+      mountPath: /var/data
+      sizeGB: 1
