@@ -2,6 +2,7 @@ services:
   - type: web
     name: nexora-backend
     runtime: node
+    plan: free
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
@@ -12,18 +13,16 @@ services:
       - key: PORT
         value: 10000
       - key: FRONTEND_ORIGIN
-        sync: false
+        value: https://nexora-navy-seven.vercel.app
       - key: NEXORA_JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
         sync: false
-      - key: NEXORA_DB_PATH
-        value: /var/data/nexora.sqlite
-      - key: NEXORA_STORAGE_PATH
-        value: /var/data/storage
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: AI_PROVIDER
         value: puter
       - key: AI_API_KEY
         sync: false
-    disk:
-      name: nexora-data
-      mountPath: /var/data
-      sizeGB: 1

@@ -1,7 +1,51 @@
 const path = require('path')
 const sqlite3 = require('sqlite3').verbose()
+const { Pool } = require('pg')
+const { AsyncLocalStorage } = require('async_hooks')
 
-const database = new sqlite3.Database(process.env.NEXORA_DB_PATH || path.join(__dirname, 'nexora.sqlite'))
+const usingPostgres = Boolean(process.env.DATABASE_URL)
+const transactionContext = new AsyncLocalStorage()
+const postgresPool = usingPostgres ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined }) : null
+let postgresReady = Promise.resolve()
+
+function postgresSql(sql) {
+	const ignoredInsert = /\bINSERT OR IGNORE\b/i.test(sql)
+	let next = sql
+		.replace(/PRAGMA foreign_keys = ON;\s*/i, '')
+		.replace(/INSERT OR IGNORE INTO roles \(id, name\) VALUES \('role-admin', 'ADMINISTRADOR'\);/i, "INSERT INTO roles (id, name) VALUES ('role-admin', 'ADMINISTRADOR') ON CONFLICT DO NOTHING;")
+		.replace(/strftime\('%Y-%m', 'now'\)/gi, "to_char(CURRENT_TIMESTAMP, 'YYYY-MM')")
+		.replace(/strftime\('%Y-%m', ([^)]+)\)/gi, "to_char($1::timestamp, 'YYYY-MM')")
+		.replace(/strftime\('%d\/%m\/%Y', ([^)]+)\)/gi, "to_char($1::timestamp, 'DD/MM/YYYY')")
+		.replace(/datetime\(([^)]+)\)\s*>=\s*datetime\('now'\)/gi, '$1::timestamp >= CURRENT_TIMESTAMP')
+		.replace(/date\(([^)]+)\)\s*(>=|<=)\s*date\(\?\)/gi, 'CAST($1 AS DATE) $2 CAST(? AS DATE)')
+		.replace(/"([A-Za-zÀ-ÿ ]+)"\s+AS/g, "'$1' AS")
+	if (ignoredInsert && !next.includes(';')) next = `${next.trim()} ON CONFLICT DO NOTHING`
+	let index = 0
+	return next.replace(/\?/g, () => `$${++index}`)
+}
+
+function enqueuePostgres(work) {
+	const queued = postgresReady.then(work)
+	postgresReady = queued.catch(() => undefined)
+	return queued
+}
+
+function postgresDatabase() {
+	const execute = (sql, params) => {
+		const client = transactionContext.getStore()
+		if (client) return client.query(postgresSql(sql), params)
+		return enqueuePostgres(() => postgresPool.query(postgresSql(sql), params))
+	}
+	return {
+		exec(sql) { enqueuePostgres(() => postgresPool.query(postgresSql(sql))).catch((error) => console.error(error)) },
+		run(sql, params, callback) { execute(sql, params).then((result) => callback.call({ lastID: null, changes: result.rowCount }, null), (error) => callback.call({ lastID: null, changes: 0 }, error)); return this },
+		get(sql, params, callback) { execute(sql, params).then((result) => callback(null, result.rows[0]), callback); return this },
+		all(sql, params, callback) { execute(sql, params).then((result) => callback(null, result.rows), callback); return this },
+		close(callback) { postgresPool.end().then(() => callback(null), callback) },
+	}
+}
+
+const database = usingPostgres ? postgresDatabase() : new sqlite3.Database(process.env.NEXORA_DB_PATH || path.join(__dirname, 'nexora.sqlite'))
 
 database.exec(`
 PRAGMA foreign_keys = ON;
@@ -57,6 +101,7 @@ for (const module of permissionModules) for (const action of permissionActions) 
 for (const module of permissionModules) for (const action of permissionActions) database.run('INSERT OR IGNORE INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = ? AND p.module = ? AND p.action = ?', ['ADMINISTRADOR', module, action])
 const roleRules = { GESTOR: ['view', 'create', 'edit', 'archive', 'approve'], FINANCEIRO: ['view', 'create', 'edit', 'pay', 'receive', 'export'], COMPRAS: ['view', 'create', 'edit', 'approve', 'receive', 'export'], ESTOQUE: ['view', 'create', 'edit', 'archive', 'receive'], CAMPO: ['view', 'create', 'edit'], CONSULTA: ['view'] }
 for (const [roleName, actions] of Object.entries(roleRules)) for (const module of permissionModules) for (const action of actions) database.run('INSERT OR IGNORE INTO role_permissions (role_id, permission_id) SELECT r.id, p.id FROM roles r, permissions p WHERE r.name = ? AND p.module = ? AND p.action = ?', [roleName, module, action])
+if (!usingPostgres) {
 database.run('ALTER TABLE products ADD COLUMN archived INTEGER NOT NULL DEFAULT 0', (error) => { if (error && !error.message.includes('duplicate column')) console.error(error) })
 for (const column of ['state_registration', 'zip_code', 'address', 'address_number', 'complement', 'district', 'contact_name', 'category', 'payment_terms', 'bank', 'bank_branch', 'bank_account', 'pix_key', 'archived']) database.run(`ALTER TABLE suppliers ADD COLUMN ${column} ${column === 'archived' ? 'INTEGER NOT NULL DEFAULT 0' : 'TEXT'}`, (error) => { if (error && !error.message.includes('duplicate column')) console.error(error) })
 for (const column of ['number', 'cost_center', 'requested_date', 'needed_date', 'justification', 'observations']) database.run(`ALTER TABLE purchase_requests ADD COLUMN ${column} TEXT`, (error) => { if (error && !error.message.includes('duplicate column')) console.error(error) })
@@ -69,11 +114,27 @@ for (const column of ['category', 'cost_center', 'document_number', 'issue_date'
 for (const column of ['category', 'revenue_center', 'document_number', 'issue_date', 'competence', 'discount', 'interest', 'receipt_method', 'bank_account', 'observations']) database.run(`ALTER TABLE accounts_receivable ADD COLUMN ${column} ${['discount', 'interest'].includes(column) ? 'REAL NOT NULL DEFAULT 0' : 'TEXT'}`, (error) => { if (error && !error.message.includes('duplicate column')) console.error(error) })
 for (const column of ['opened_at', 'scheduled_at', 'completed_at', 'responsible', 'supplier', 'horometer', 'mileage', 'parts_used', 'labor_cost', 'observations']) database.run(`ALTER TABLE maintenance_records ADD COLUMN ${column} ${['horometer', 'mileage', 'labor_cost'].includes(column) ? 'REAL' : 'TEXT'}`, (error) => { if (error && !error.message.includes('duplicate column')) console.error(error) })
 for (const column of ['description', 'priority', 'archived']) database.run(`ALTER TABLE tasks ADD COLUMN ${column} ${column === 'archived' ? 'INTEGER NOT NULL DEFAULT 0' : 'TEXT'}`, (error) => { if (error && !error.message.includes('duplicate column')) console.error(error) })
+}
 
 function run(sql, params = []) { return new Promise((resolve, reject) => database.run(sql, params, function onRun(error) { if (error) reject(error); else resolve({ id: this.lastID, changes: this.changes }) })) }
 function get(sql, params = []) { return new Promise((resolve, reject) => database.get(sql, params, (error, row) => error ? reject(error) : resolve(row))) }
 function all(sql, params = []) { return new Promise((resolve, reject) => database.all(sql, params, (error, rows) => error ? reject(error) : resolve(rows))) }
-function transaction(callback) { return run('BEGIN').then(() => callback()).then((result) => run('COMMIT').then(() => result)).catch((error) => run('ROLLBACK').then(() => { throw error })) }
+async function transaction(callback) {
+	if (!usingPostgres) return run('BEGIN').then(() => callback()).then((result) => run('COMMIT').then(() => result)).catch((error) => run('ROLLBACK').then(() => { throw error }))
+	const task = enqueuePostgres(async () => {
+		const client = await postgresPool.connect()
+		try {
+			await client.query('BEGIN')
+			const result = await transactionContext.run(client, callback)
+			await client.query('COMMIT')
+			return result
+		} catch (error) {
+			await client.query('ROLLBACK')
+			throw error
+		} finally { client.release() }
+	})
+	return task
+}
 function close() { return new Promise((resolve, reject) => database.close((error) => error ? reject(error) : resolve())) }
 
 module.exports = { run, get, all, transaction, close }
