@@ -277,6 +277,11 @@ button, input, select, textarea { font-family: inherit; }
 .employee-info span { display:flex; align-items:center; gap:5px; color:#91a6af; font-size:9px; font-weight:700; text-transform:uppercase; }
 .employee-info b { overflow-wrap:anywhere; color:#46697a; font-size:11px; font-weight:600; }
 .employee-notes { padding:11px 13px; border-left:2px solid #b6d4df; margin:12px 0; color:#597888; background:#f7fafb; font-size:11px; white-space:pre-wrap; }
+.employee-employment-history { padding:12px; border:1px solid #e7eef1; border-radius:8px; margin-top:12px; background:#fbfdfe; }
+.employee-employment-history h3 { margin:0 0 9px; color:#557687; font:700 11px Manrope,sans-serif; }
+.employee-employment-history > div { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 0; border-top:1px solid #edf2f4; }
+.employee-employment-history > div > span { display:flex; align-items:center; gap:6px; color:#5f7d8c; font-size:10px; }
+.employee-employment-history > div > small { color:#92a5ad; font-size:9px; }
 .employee-doc-heading { display:flex; align-items:center; justify-content:space-between; margin:24px 0 12px; }
 .employee-doc-heading h3 { margin:0; color:#365f74; font:700 13px Manrope,sans-serif; }
 .employee-doc-heading p { margin:5px 0 0; color:#91a5ae; font-size:10px; }

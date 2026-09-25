@@ -112,8 +112,11 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
     try {
       const record = await employee(request.params.id, request.user.company_id)
       if (!record) return response.status(404).json({ error: 'Funcionário não encontrado.' })
-      const documents = await db.all('SELECT * FROM employee_documents WHERE employee_id = ? AND company_id = ? ORDER BY created_at DESC', [record.id, request.user.company_id])
-      response.json({ ...record, documents: documents.map(publicDocument) })
+      const [documents, employmentHistory] = await Promise.all([
+        db.all('SELECT * FROM employee_documents WHERE employee_id = ? AND company_id = ? ORDER BY created_at DESC', [record.id, request.user.company_id]),
+        db.all('SELECT * FROM employee_employment_history WHERE employee_id = ? AND company_id = ? ORDER BY start_date DESC, created_at DESC', [record.id, request.user.company_id]),
+      ])
+      response.json({ ...record, documents: documents.map(publicDocument), employment_history: employmentHistory })
     } catch { response.status(500).json({ error: 'Não foi possível carregar o cadastro do funcionário.' }) }
   })
 
@@ -139,11 +142,43 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
     try {
       const previous = await employee(request.params.id, request.user.company_id)
       if (!previous) return response.status(404).json({ error: 'Funcionário não encontrado.' })
-      await db.run("UPDATE employees SET status = 'DEMITIDO', termination_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?", [terminationDate, previous.id, request.user.company_id])
+      if (previous.status === 'DEMITIDO') return response.status(409).json({ error: 'Este funcionário já está demitido.' })
+      if (previous.admission_date && terminationDate < previous.admission_date.slice(0, 10)) return response.status(400).json({ error: 'A data de desligamento não pode ser anterior à admissão.' })
+      await db.transaction(async () => {
+        if (previous.admission_date) await db.run('INSERT INTO employee_employment_history (id, company_id, employee_id, start_date, end_date, job_title, department, notes, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), request.user.company_id, previous.id, previous.admission_date.slice(0, 10), terminationDate, previous.job_title || null, previous.department || null, previous.notes || null, request.user.id])
+        await db.run("UPDATE employees SET status = 'DEMITIDO', termination_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?", [terminationDate, previous.id, request.user.company_id])
+      })
       const updated = await employee(previous.id, request.user.company_id)
       await audit(request.user, 'DEMITIR', 'FUNCIONARIOS', previous.id, { status: previous.status, termination_date: previous.termination_date }, { status: updated.status, termination_date: updated.termination_date })
       response.json(updated)
     } catch { response.status(500).json({ error: 'Não foi possível registrar o desligamento.' }) }
+  })
+
+  router.patch('/api/employees/:id/rehire', ...permission('create'), async (request, response) => {
+    const admissionDate = request.body?.admission_date
+    if (!admissionDate || !validDate(admissionDate)) return response.status(400).json({ error: 'Informe uma data de readmissão válida.' })
+    const companyId = request.user.company_id
+    try {
+      const previous = await employee(request.params.id, companyId)
+      if (!previous) return response.status(404).json({ error: 'Funcionário não encontrado.' })
+      if (previous.status !== 'DEMITIDO') return response.status(409).json({ error: 'A readmissão está disponível apenas para funcionários demitidos.' })
+      if (previous.termination_date && admissionDate <= previous.termination_date.slice(0, 10)) return response.status(400).json({ error: 'A nova admissão deve ocorrer após a data do desligamento anterior.' })
+      await db.transaction(async () => {
+        if (previous.admission_date && previous.termination_date) {
+          const oldAdmission = previous.admission_date.slice(0, 10)
+          const oldTermination = previous.termination_date.slice(0, 10)
+          const existing = await db.get('SELECT id FROM employee_employment_history WHERE employee_id = ? AND company_id = ? AND start_date = ? AND end_date = ?', [previous.id, companyId, oldAdmission, oldTermination])
+          if (!existing) await db.run('INSERT INTO employee_employment_history (id, company_id, employee_id, start_date, end_date, job_title, department, notes, recorded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), companyId, previous.id, oldAdmission, oldTermination, previous.job_title || null, previous.department || null, previous.notes || null, request.user.id])
+        }
+        await db.run("UPDATE employees SET status = 'ATIVO', admission_date = ?, termination_date = NULL, job_title = ?, department = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?", [admissionDate, String(request.body?.job_title || '').trim() || previous.job_title || null, String(request.body?.department || '').trim() || previous.department || null, previous.id, companyId])
+      })
+      const updated = await employee(previous.id, companyId)
+      await audit(request.user, 'READMITIR', 'FUNCIONARIOS', previous.id, { status: previous.status, termination_date: previous.termination_date }, { status: updated.status, admission_date: updated.admission_date })
+      response.json(updated)
+    } catch (error) {
+      console.error(error)
+      response.status(500).json({ error: 'Não foi possível readmitir o funcionário.' })
+    }
   })
 
   router.post('/api/employees/:id/documents', ...permission('upload'), handleUpload, async (request, response) => {
