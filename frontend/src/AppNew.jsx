@@ -36,6 +36,24 @@ const rowsFrom = (result) => {
   if (Array.isArray(result.items)) return result.items
   return []
 }
+const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+async function fetchAuthResponse(url, body) {
+  let response
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      break
+    } catch (error) {
+      if (attempt === 2) throw new Error('Não foi possível conectar ao servidor da Nexora. Verifique sua conexão e tente novamente.')
+      await wait(700 * (attempt + 1))
+    }
+  }
+  const contentType = response.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) throw new Error('O servidor da Nexora está temporariamente indisponível. Tente novamente em instantes.')
+  const result = await response.json().catch(() => null)
+  if (!result || typeof result !== 'object') throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
+  return { response, result }
+}
 let visualPageApi = {}
 
 function AppNew() {
@@ -126,13 +144,20 @@ function AppNew() {
   // eslint-disable-next-line react/immutability, react-hooks/exhaustive-deps
   useEffect(() => { if (!session?.token) return undefined; const params = query.trim() ? { search: query.trim(), page: 1 } : { page: 1 }; if (activeMenu === 'Projetos e obras') loadProjects(params); if (activeMenu === 'Clientes') loadClients(params); if (activeMenu === 'Estoque') loadStock(params); if (activeMenu === 'Fornecedores') loadSuppliers(params); if (activeMenu === 'Compras') { loadPurchaseRequests(params); void loadQuotations(params) } if (activeMenu === 'Financeiro') { loadPayables(params); loadReceivables(params) } if (activeMenu === 'Equipamentos') { loadEquipments(params); loadMaintenances(params) } if (activeMenu === 'Agenda de campo') loadAgenda(params); if (activeMenu === 'Documentos') loadDocuments(params); return undefined }, [activeMenu, query, session?.token])
 
-  function handleLogin(event) {
+  async function handleLogin(event) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const email = String(form.get('email') || '').trim()
     const password = form.get('password')
     if (!email || !password) return setAuthError('Preencha seu e-mail e senha para continuar.')
-    fetch(`${API_URL}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).then(async (response) => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível entrar.'); const nextSession = { token: result.token, userId: result.user.id, email: result.user.email, userName: result.user.name, companyName: result.company.name, role: result.user.role, permissions: result.user.permissions || [], companyId: result.user.companyId }; localStorage.setItem('nexora-session', JSON.stringify(nextSession)); setSession(nextSession) }).catch((error) => setAuthError(error instanceof TypeError ? 'Não foi possível conectar ao servidor da Nexora. Aguarde alguns segundos e tente novamente.' : error.message))
+    setAuthError('')
+    try {
+      const { response, result } = await fetchAuthResponse(`${API_URL}/auth/login`, { email, password })
+      if (!response.ok) throw new Error(result.error || 'Não foi possível entrar. Confira seu e-mail e sua senha.')
+      if (!result.token || !result.user || !result.company) throw new Error('O servidor não concluiu o acesso. Tente novamente.')
+      const nextSession = { token: result.token, userId: result.user.id, email: result.user.email, userName: result.user.name, companyName: result.company.name, role: result.user.role, permissions: result.user.permissions || [], companyId: result.user.companyId }
+      localStorage.setItem('nexora-session', JSON.stringify(nextSession)); setSession(nextSession)
+    } catch (error) { setAuthError(error.message || 'Não foi possível entrar. Tente novamente.') }
   }
 
   function handleSignup(event) {
