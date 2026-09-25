@@ -198,6 +198,7 @@ function AppNew() {
   if (dataError) return <DataState message={dataError} action={<button className="blue-button" onClick={retryData}>Tentar novamente</button>} />
   visualPageApi = { projects: { pagination: projectPagination, onLoad: loadProjects }, stock: { pagination: stockPagination, onLoad: loadStock }, clients: { pagination: clientPagination, onLoad: loadClients }, suppliers: { pagination: supplierPagination, onLoad: loadSuppliers }, purchases: { pagination: purchasePagination, onLoad: loadPurchaseRequests }, finance: { pagination: payablePagination, onLoad: loadPayables }, equipment: { pagination: equipmentPagination, onLoad: loadEquipments }, agenda: { pagination: agendaPagination, onLoad: loadAgenda }, documents: { pagination: documentPagination, onLoad: loadDocuments } }
   return <div className="nexora-shell">
+    {sidebarOpen && <button className="sidebar-backdrop" aria-label="Fechar menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`nexora-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <div className="nexora-brand"><img src="/logo_sem_fundo.png" alt="Nexora" /><span>gestão inteligente para obras</span></div>
       <div className="company-switcher"><div className="company-avatar">{companyInitials}</div><div><strong>{session.companyName}</strong><small>Plano profissional</small></div><ChevronDown size={15} /></div>
