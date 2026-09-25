@@ -13,13 +13,14 @@ function postgresSql(sql) {
 	let next = sql
 		.replace(/PRAGMA foreign_keys = ON;\s*/i, '')
 		.replace(/INSERT OR IGNORE INTO roles \(id, name\) VALUES \('role-admin', 'ADMINISTRADOR'\);/i, "INSERT INTO roles (id, name) VALUES ('role-admin', 'ADMINISTRADOR') ON CONFLICT DO NOTHING;")
+		.replace(/\bINSERT\s+OR\s+IGNORE\s+INTO\b/gi, 'INSERT INTO')
 		.replace(/strftime\('%Y-%m', 'now'\)/gi, "to_char(CURRENT_TIMESTAMP, 'YYYY-MM')")
 		.replace(/strftime\('%Y-%m', ([^)]+)\)/gi, "to_char($1::timestamp, 'YYYY-MM')")
 		.replace(/strftime\('%d\/%m\/%Y', ([^)]+)\)/gi, "to_char($1::timestamp, 'DD/MM/YYYY')")
 		.replace(/datetime\(([^)]+)\)\s*>=\s*datetime\('now'\)/gi, '$1::timestamp >= CURRENT_TIMESTAMP')
 		.replace(/date\(([^)]+)\)\s*(>=|<=)\s*date\(\?\)/gi, 'CAST($1 AS DATE) $2 CAST(? AS DATE)')
 		.replace(/"([A-Za-zÀ-ÿ ]+)"\s+AS/g, "'$1' AS")
-	if (ignoredInsert && !next.includes(';')) next = `${next.trim()} ON CONFLICT DO NOTHING`
+	if (ignoredInsert && !/ON CONFLICT DO NOTHING/i.test(next)) next = `${next.trim().replace(/;$/, '')} ON CONFLICT DO NOTHING`
 	let index = 0
 	return next.replace(/\?/g, () => `$${++index}`)
 }
