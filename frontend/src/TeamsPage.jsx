@@ -18,10 +18,12 @@ export function TeamsPage({ session, can, notify }) {
     setLoading(true); setError('')
     try {
       const response = await fetch(`${API_URL}/teams`, { headers })
-      const result = await response.json()
+      if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Não foi possível carregar as equipes agora. Tente novamente em alguns instantes.')
+      const result = await response.json().catch(() => null)
+      if (!result || typeof result !== 'object') throw new Error('Não foi possível carregar as equipes agora. Tente novamente em alguns instantes.')
       if (!response.ok) throw new Error(result.error || 'Não foi possível carregar as equipes.')
       setData(result)
-    } catch (problem) { setError(problem instanceof TypeError ? 'Não foi possível conectar ao sistema.' : problem.message || 'Não foi possível carregar as equipes.') }
+    } catch (problem) { setError(problem instanceof TypeError ? 'Não foi possível conectar ao sistema. Verifique sua conexão e tente novamente.' : problem.message || 'Não foi possível carregar as equipes agora.') }
     finally { setLoading(false) }
   }, [session.token])
   useEffect(() => { void load() }, [load])
