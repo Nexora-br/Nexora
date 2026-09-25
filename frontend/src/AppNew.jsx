@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   ArrowRight, BarChart3, Bell, Bot, CalendarDays, Check, ChevronDown, CircleHelp,
-  ClipboardList, Factory, FileText, Handshake, LayoutDashboard,
+  ClipboardList, Factory, FileText, Handshake, LayoutDashboard, Layers3,
   LogOut, Menu, Package, Plus, ReceiptText, Search, Settings2, ShoppingCart, Truck,
   Users, UsersRound, WalletCards, Warehouse, Wrench, X,
 } from 'lucide-react'
@@ -37,6 +37,7 @@ let visualPageApi = {}
 function AppNew() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('nexora-session') || 'null'))
   const [authView, setAuthView] = useState('login')
+  const [showAuth, setShowAuth] = useState(false)
   const [authError, setAuthError] = useState('')
   const [activeMenu, setActiveMenu] = useState('Visão geral')
   const [aiDraft, setAiDraft] = useState('')
@@ -145,9 +146,12 @@ function AppNew() {
     localStorage.removeItem('nexora-session')
     setSession(null)
     setAuthView('login')
+    setShowAuth(false)
   }
 
-  if (!session?.token) return <AuthScreen view={authView} setView={(view) => { setAuthError(''); setAuthView(view) }} error={authError} onLogin={handleLogin} onSignup={handleSignup} />
+  if (!session?.token) return showAuth
+    ? <><button className="auth-back-button" onClick={() => { setAuthError(''); setShowAuth(false) }}>← Voltar à página inicial</button><AuthScreen view={authView} setView={(view) => { setAuthError(''); setAuthView(view) }} error={authError} onLogin={handleLogin} onSignup={handleSignup} /></>
+    : <NexoraLandingPage onRestricted={() => { setAuthError(''); setAuthView('login'); setShowAuth(true) }} />
 
   const normalizedQuery = query.trim().toLowerCase()
   const filteredProjects = normalizedQuery ? projects.filter((project) => `${project.name} ${project.location} ${project.code}`.toLowerCase().includes(normalizedQuery)) : projects
@@ -208,6 +212,84 @@ function AppNew() {
     {(showProjectModal || editingProject) && <ProjectModal project={editingProject} onClose={() => { setShowProjectModal(false); setEditingProject(null) }} onCreate={editingProject ? updateProject : createProject} />}
     {showSupplyModal && <SupplyModal projects={projects} onClose={() => setShowSupplyModal(false)} onCreate={createSupply} />}
     {toast && <div className="toast"><Check size={17} />{toast}</div>}
+  </div>
+}
+
+function NexoraLandingPage({ onRestricted }) {
+  useEffect(() => {
+    const items = document.querySelectorAll('.nexora-reveal')
+    if (!('IntersectionObserver' in window)) { items.forEach((item) => item.classList.add('is-visible')); return undefined }
+    const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+      if (entry.isIntersecting) { entry.target.classList.add('is-visible'); observer.unobserve(entry.target) }
+    }), { threshold: 0.14 })
+    items.forEach((item) => observer.observe(item))
+    return () => observer.disconnect()
+  }, [])
+
+  const benefits = [
+    { icon: ClipboardList, title: 'Tudo no mesmo fluxo', text: 'Projetos, tarefas, agenda, equipes e documentos ficam conectados em uma única rotina.' },
+    { icon: BarChart3, title: 'Mais clareza para decidir', text: 'Acompanhe o andamento da operação e encontre as informações que ajudam no próximo passo.' },
+    { icon: UsersRound, title: 'Campo e escritório alinhados', text: 'Aproximamos quem planeja de quem executa, com responsabilidades e prazos mais visíveis.' },
+  ]
+  const modules = [
+    { icon: Factory, label: 'Projetos e obras' }, { icon: CalendarDays, label: 'Agenda de campo' },
+    { icon: Package, label: 'Estoque e compras' }, { icon: WalletCards, label: 'Financeiro' },
+  ]
+
+  return <div className="nexora-landing">
+    <header className="landing-header">
+      <a className="landing-brand" href="#inicio" aria-label="Nexora, início"><img src="/logo_sem_fundo.png" alt="Nexora" /></a>
+      <nav className="landing-nav" aria-label="Navegação principal"><a href="#sobre">A Nexora</a><a href="#beneficios">Benefícios</a><a href="#historia">Nossa história</a></nav>
+      <button className="landing-restricted" onClick={onRestricted}>Área restrita <ArrowRight size={16} /></button>
+    </header>
+
+    <main>
+      <section className="landing-hero" id="inicio">
+        <div className="landing-hero-glow" />
+        <div className="landing-hero-copy">
+          <span className="landing-eyebrow"><span /> GESTÃO QUE ACOMPANHA O CAMPO</span>
+          <h1>Da instalação à operação, <em>tudo conectado.</em></h1>
+          <p>A Nexora organiza projetos, equipes e recursos para que sua operação avance com mais clareza — do escritório ao campo.</p>
+          <div className="landing-hero-actions"><a className="landing-primary" href="#sobre">Conheça a Nexora <ArrowRight size={17} /></a><button className="landing-text-link" onClick={onRestricted}>Acessar minha conta <ArrowRight size={15} /></button></div>
+          <div className="landing-proof"><span className="landing-proof-icon"><Warehouse size={17} /></span><span>Feita para a realidade de quem constrói e move o agro.</span></div>
+        </div>
+        <div className="landing-visual" aria-label="Visão ilustrativa dos módulos Nexora">
+          <div className="landing-orbit orbit-one" /><div className="landing-orbit orbit-two" />
+          <div className="landing-visual-logo"><img src="/logo_sem_fundo.png" alt="" /></div>
+          <div className="landing-float-card landing-float-top"><span className="landing-mini-icon"><Factory size={17} /></span><span><b>Projetos</b><small>Da implantação à entrega</small></span><span className="landing-live-dot" /></div>
+          <div className="landing-feature-core"><div className="landing-core-icon"><Layers3 size={31} /></div><strong>Uma operação.<br />Uma visão.</strong><span>O trabalho conectado, de ponta a ponta.</span></div>
+          <div className="landing-float-card landing-float-bottom"><span className="landing-mini-icon green"><UsersRound size={17} /></span><span><b>Equipes em sintonia</b><small>Campo + escritório</small></span><ArrowRight size={15} /></div>
+          <span className="landing-spark spark-one">✳</span><span className="landing-spark spark-two">✳</span>
+        </div>
+        <a className="landing-scroll-cue" href="#sobre"><span>Role para conhecer</span><ChevronDown size={16} /></a>
+      </section>
+
+      <section className="landing-section landing-about" id="sobre">
+        <div className="landing-section-intro nexora-reveal"><span className="landing-section-kicker">O QUE É A NEXORA</span><h2>Gestão pensada para o trabalho que acontece de verdade.</h2></div>
+        <div className="landing-about-copy nexora-reveal"><p>A Nexora é uma plataforma de gestão empresarial para empresas que instalam e acompanham silos e secadores de grãos — e para as muitas frentes que fazem esse trabalho acontecer.</p><p>Projetos, tarefas, agenda de campo, equipamentos, estoque, compras e financeiro ganham um lugar comum. Assim, cada pessoa encontra o contexto necessário para seguir com o trabalho.</p><a href="#modulos" className="landing-inline-link">Veja como as áreas se conectam <ArrowRight size={16} /></a></div>
+      </section>
+
+      <section className="landing-modules" id="modulos" aria-label="Áreas conectadas na Nexora">
+        <div className="landing-modules-track">{[...modules, ...modules].map(({ icon: Icon, label }, index) => <div className="landing-module-chip" key={`${label}-${index}`}><Icon size={17} />{label}</div>)}</div>
+      </section>
+
+      <section className="landing-section landing-benefits" id="beneficios">
+        <div className="landing-section-intro nexora-reveal"><span className="landing-section-kicker">POR QUE USAR A NEXORA</span><h2>Menos ruído na rotina.<br /><em>Mais espaço para avançar.</em></h2><p>Uma visão integrada ajuda a transformar informação dispersa em ação coordenada.</p></div>
+        <div className="landing-benefit-grid">{benefits.map(({ icon: Icon, title, text }, index) => <article className="landing-benefit-card nexora-reveal" key={title} style={{ '--reveal-delay': `${index * 120}ms` }}><span className="landing-benefit-icon"><Icon size={21} /></span><span className="landing-card-number">0{index + 1}</span><h3>{title}</h3><p>{text}</p><span className="landing-card-line" /></article>)}</div>
+      </section>
+
+      <section className="landing-purpose" id="objetivo">
+        <div className="landing-purpose-art nexora-reveal"><div className="purpose-ring ring-a" /><div className="purpose-ring ring-b" /><span className="purpose-center"><Bot size={32} /></span><span className="purpose-node node-a"><Factory size={18} /></span><span className="purpose-node node-b"><Truck size={18} /></span><span className="purpose-node node-c"><UsersRound size={18} /></span></div>
+        <div className="landing-purpose-copy nexora-reveal"><span className="landing-section-kicker">NOSSO OBJETIVO</span><h2>Conectar quem planeja com quem faz.</h2><p>Queremos tornar a gestão de operações complexas mais simples e próxima da realidade do campo. A Nexora existe para dar visibilidade ao trabalho, apoiar a colaboração e ajudar cada equipe a avançar com mais confiança.</p><div className="landing-purpose-note"><span /> Tecnologia a serviço de pessoas, projetos e resultados reais.</div></div>
+      </section>
+
+      <section className="landing-story" id="historia">
+        <div className="landing-story-inner"><div className="landing-story-mark nexora-reveal"><img src="/logo_sem_fundo.png" alt="Nexora" /><span>UMA HISTÓRIA QUE SEGUE EM MOVIMENTO</span></div><div className="landing-story-copy nexora-reveal"><span className="landing-section-kicker">NOSSA HISTÓRIA</span><h2>Uma necessidade concreta.<br /><em>Uma visão cada vez maior.</em></h2><p>A Nexora começou olhando de perto para um desafio específico: acompanhar projetos de instalação de silos e secadores de grãos, com suas equipes, prazos, materiais e etapas em campo.</p><p>Desse ponto de partida nasceu uma ideia mais ampla: reunir em uma só plataforma as informações que ajudam uma empresa a funcionar melhor. A Nexora continua evoluindo com esse propósito — aproximar a gestão do dia a dia e tornar cada etapa mais visível.</p></div></div>
+      </section>
+
+      <section className="landing-final-cta"><div className="landing-cta-orb" /><span className="landing-section-kicker">A PRÓXIMA ETAPA COMEÇA COM CLAREZA</span><h2>Vamos fazer sua operação avançar?</h2><p>Entre na área restrita para acessar sua conta Nexora.</p><button className="landing-primary" onClick={onRestricted}>Acessar a Nexora <ArrowRight size={17} /></button></section>
+    </main>
+    <footer className="landing-footer"><a className="landing-brand" href="#inicio"><img src="/logo_sem_fundo.png" alt="Nexora" /></a><span>Gestão conectada ao campo.</span><a href="#inicio">Voltar ao início ↑</a><small>© {new Date().getFullYear()} Nexora</small></footer>
   </div>
 }
 
