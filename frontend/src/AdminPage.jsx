@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, Pencil, Plus, RefreshCw, ShieldCheck, UserRound, X } from 'lucide-react'
 import './AppNew.css'
+import { API_URL } from './apiConfig'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333/api'
 const actionLabels = { view: 'Visualizar', create: 'Criar', edit: 'Editar', delete: 'Excluir', archive: 'Arquivar', approve: 'Aprovar', pay: 'Pagar', receive: 'Receber', export: 'Exportar', upload: 'Upload', download: 'Download' }
 
 function AdminPage({ session, notify }) {

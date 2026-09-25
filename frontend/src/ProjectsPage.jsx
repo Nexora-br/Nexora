@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Factory, Plus, X } from 'lucide-react'
 import './AppNew.css'
+import { API_URL } from './apiConfig'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333/api'
 
 function ProjectsPage({ projects, pagination, onLoad, onNew, onEdit, session }) {
   const [search, setSearch] = useState('')

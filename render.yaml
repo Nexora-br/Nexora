@@ -3,6 +3,7 @@ services:
     name: nexora-backend
     runtime: node
     plan: free
+    autoDeploy: true
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
