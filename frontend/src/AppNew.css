@@ -296,6 +296,55 @@ button, input, select, textarea { font-family: inherit; }
 .employee-no-documents { padding:15px; color:#95a8b0; font-size:11px; text-align:center; }
 .employee-detail > .modal-actions { display:flex; align-items:center; gap:8px; padding-top:14px; border-top:1px solid #edf2f4; margin-top:20px; }
 .employee-detail > .modal-actions > span { flex:1; }
+.team-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0 0 16px; }
+.team-metrics > article { display:flex; min-height:105px; flex-direction:column; justify-content:center; padding:16px 18px; }
+.team-metrics > article > span { display:flex; align-items:center; gap:7px; color:#829ba7; font-size:10px; font-weight:700; text-transform:uppercase; }
+.team-metrics > article > span svg { color:#4e8ca4; }
+.team-metrics > article > b { margin:8px 0 2px; color:#31586e; font:700 23px Manrope,sans-serif; }
+.team-metrics > article > small { color:#91a5ae; font-size:10px; }
+.team-panel .panel-heading { align-items:center; }
+.team-panel .panel-heading > div > h2 { margin:0; color:#365e73; font:700 14px Manrope,sans-serif; }
+.team-panel .panel-heading > div > p { margin:5px 0 0; color:#91a5ae; font-size:10px; }
+.team-panel .panel-heading > button { display:flex; align-items:center; gap:6px; }
+.team-project-list { display:grid; gap:10px; }
+.team-project-card { padding:15px 16px; border:1px solid #e8eff2; border-radius:9px; background:#fff; }
+.team-project-top { display:flex; align-items:center; gap:11px; }
+.team-project-icon,.team-person-avatar { display:grid; flex:0 0 auto; place-items:center; border-radius:9px; color:#43819b; background:#eaf4f7; }
+.team-project-icon { width:38px; height:38px; }
+.team-project-title { display:flex; flex:1; min-width:0; align-items:center; justify-content:space-between; gap:10px; }
+.team-project-title > div { min-width:0; }
+.team-project-title b,.team-project-title small { display:block; }
+.team-project-title b { overflow:hidden; color:#456a7c; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.team-project-title small { margin-top:4px; color:#94a8b0; font-size:9px; }
+.team-project-title .team-location { display:flex; align-items:center; gap:4px; margin:0; }
+.team-count { display:flex; flex:0 0 auto; align-items:center; gap:5px; padding:6px 9px; border-radius:20px; color:#52869a; background:#f0f7f9; font-size:9px; font-weight:700; }
+.team-roster { display:grid; gap:5px; margin:13px 0 0 49px; }
+.team-person { display:flex; align-items:center; gap:9px; padding:8px 0; border-top:1px solid #f0f4f5; }
+.team-person-avatar { width:29px; height:29px; border-radius:50%; }
+.team-person > div { flex:1; min-width:0; }
+.team-person b,.team-person small { display:block; }
+.team-person b { color:#4c6e7e; font-size:10px; }
+.team-person small { margin-top:3px; color:#94a8b0; font-size:9px; }
+.team-no-members { padding:15px 0 3px 49px; color:#9aabb2; font-size:10px; }
+.team-history-toggle { display:flex; align-items:center; gap:6px; padding:9px 0 0 49px; border:0; color:#55869a; background:transparent; font:600 10px Manrope,sans-serif; cursor:pointer; }
+.team-history-list { display:grid; gap:8px; padding:10px 0 1px 49px; }
+.team-history-row { display:flex; align-items:center; gap:7px; color:#8ba0a9; font-size:9px; }
+.team-history-row > svg { color:#61a486; }
+.team-history-row > span { flex:1; }
+.team-history-row b { color:#627f8d; }
+.team-empty { display:flex; min-height:130px; flex-direction:column; align-items:center; justify-content:center; gap:9px; padding:24px; color:#92a6ae; font-size:11px; text-align:center; }
+.team-empty > svg { color:#7eaaba; }
+.team-empty b { color:#58798a; font-size:12px; }
+.team-error { color:#a24f50; }
+.team-form { width:min(100%,600px); max-height:min(91vh,850px); overflow-y:auto; }
+.team-form h2 { margin:6px 0 8px; color:#31586e; font:700 19px Manrope,sans-serif; }
+.team-form > p { margin:0 0 18px; color:#8299a4; font-size:11px; line-height:1.6; }
+.team-form .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.team-form textarea { width:100%; padding:10px 12px; border:1px solid #dfe9ed; border-radius:7px; color:#355d72; font:12px Manrope,sans-serif; resize:vertical; }
+.team-reallocation-note { display:flex; align-items:flex-start; gap:8px; padding:10px 12px; border:1px solid #e8edf0; border-radius:7px; margin-top:12px; color:#7c929c; background:#f8fafb; font-size:10px; line-height:1.55; }
+.team-reallocation-note svg { flex:0 0 auto; margin-top:1px; color:#bc9651; }
+.team-form .modal-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:18px; }
+@media(max-width:760px) { .team-metrics { grid-template-columns:1fr; }.team-metrics > article { min-height:auto; padding:13px 15px; }.team-project-top { align-items:flex-start; flex-wrap:wrap; }.team-project-title { flex-direction:column; align-items:flex-start; }.team-count { margin-left:auto; }.team-roster,.team-no-members,.team-history-toggle,.team-history-list { margin-left:0; padding-left:0; }.team-person { flex-wrap:wrap; }.team-person .table-action { margin-left:38px; }.team-form .form-grid { grid-template-columns:1fr; } }
 @media(max-width:760px) { .employee-toolbar { align-items:stretch; flex-direction:column; }.employee-toolbar .search-box { max-width:none; }.employee-filter-tabs { justify-content:space-between; }.employee-filter-tabs button { flex:1; }.employee-form .form-grid,.employee-upload-form .form-grid,.employee-info-grid { grid-template-columns:1fr; }.employee-upload-submit { align-items:stretch; flex-direction:column; }.employee-document-row { flex-wrap:wrap; }.employee-document-row > div { flex-basis:calc(100% - 50px); }.employee-panel .panel-heading { gap:8px; } }
 @media (max-width: 760px) { .work-diary-toolbar { flex-wrap: wrap; }.work-diary-project-select { flex-basis: calc(100% - 60px); }.work-diary-count { margin-left: 52px; }.work-diary-row { align-items: flex-start; flex-wrap: wrap; }.work-diary-row-main { flex-basis: calc(100% - 60px); }.work-diary-row-actions { width: 100%; justify-content: flex-start; margin-left: 54px; }.work-diary-choice { grid-template-columns: 1fr; }.work-diary-detail-grid { grid-template-columns: 1fr; }.work-diary-modal .form-grid { grid-template-columns: 1fr; } }
 @keyframes ai-message-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
