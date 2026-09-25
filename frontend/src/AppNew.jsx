@@ -128,7 +128,7 @@ function AppNew() {
   function handleLogin(event) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const email = form.get('email')
+    const email = String(form.get('email') || '').trim()
     const password = form.get('password')
     if (!email || !password) return setAuthError('Preencha seu e-mail e senha para continuar.')
     fetch(`${API_URL}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) }).then(async (response) => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível entrar.'); const nextSession = { token: result.token, userId: result.user.id, email: result.user.email, userName: result.user.name, companyName: result.company.name, role: result.user.role, permissions: result.user.permissions || [], companyId: result.user.companyId }; localStorage.setItem('nexora-session', JSON.stringify(nextSession)); setSession(nextSession) }).catch((error) => setAuthError(error instanceof TypeError ? 'Não foi possível conectar ao servidor da Nexora. Aguarde alguns segundos e tente novamente.' : error.message))
@@ -139,7 +139,7 @@ function AppNew() {
     const form = new FormData(event.currentTarget)
     const companyName = form.get('companyName')
     const userName = form.get('userName')
-    const email = form.get('email')
+    const email = String(form.get('email') || '').trim()
     const password = form.get('password')
     if (!companyName || !userName || !email || !password) return setAuthError('Preencha todos os campos para criar sua empresa.')
     fetch(`${API_URL}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyName, userName, email, password, legalName: companyName }) }).then(async (response) => { const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível criar a conta.'); const nextSession = { token: result.token, userId: result.user.id, email: result.user.email, userName: result.user.name, companyName: result.company.name, role: result.user.role, permissions: result.user.permissions || [], companyId: result.user.companyId, companySegment: form.get('segment') }; localStorage.setItem('nexora-session', JSON.stringify(nextSession)); setSession(nextSession) }).catch((error) => setAuthError(error instanceof TypeError ? 'Não foi possível conectar ao servidor da Nexora. Aguarde alguns segundos e tente novamente.' : error.message))

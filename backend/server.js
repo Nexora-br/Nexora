@@ -57,7 +57,7 @@ async function audit(user, action, module, recordId, oldValue = null, newValue =
 const routePermission = (request) => { const path = request.path; const module = path.startsWith('/api/dashboard') || path.startsWith('/api/global-search') ? 'dashboard' : path.startsWith('/api/work-diaries') ? 'work_diary' : path.startsWith('/api/employees') ? 'employees' : path.startsWith('/api/accounts-') ? 'finance' : path.startsWith('/api/transactions') || path.startsWith('/api/cost-centers') ? 'finance' : path.startsWith('/api/purchase-') ? 'purchases' : path.startsWith('/api/quotations') ? 'quotations' : path.startsWith('/api/inventory') || path.startsWith('/api/products') || path.startsWith('/api/categories') || path.startsWith('/api/storage-locations') ? 'inventory' : path.startsWith('/api/suppliers') ? 'suppliers' : path.startsWith('/api/clients') ? 'clients' : path.startsWith('/api/projects') ? 'projects' : path.startsWith('/api/equipment') ? 'equipment' : path.startsWith('/api/maintenance') ? 'maintenance' : path.startsWith('/api/field-activities') ? 'agenda' : path.startsWith('/api/documents') ? 'documents' : path.startsWith('/api/audit-logs') ? 'audit' : path.startsWith('/api/users') ? 'users' : null; if (!module) return null; if (module === 'employees' && request.method === 'POST' && path.includes('/documents')) return [module, 'upload']; if (request.method === 'GET') return [module, path.endsWith('/export') ? 'export' : path.endsWith('/download') ? 'download' : 'view']; if (path.endsWith('/archive')) return [module, 'archive']; if (path.endsWith('/pay')) return [module, 'pay']; if (path.endsWith('/receive')) return [module, 'receive']; if (request.method === 'POST' && (path.includes('/approve') || path.includes('/select'))) return [module, 'approve']; if (request.method === 'POST') return [module, 'create']; if (request.method === 'PUT' || request.method === 'PATCH') return [module, 'edit']; if (request.method === 'DELETE') return [module, 'delete']; return null }
 app.use((request, response, next) => { if (request.path.startsWith('/api/auth') || request.path === '/api/health') return next(); const permission = routePermission(request); if (!permission) return next(); auth(request, response, () => requirePermission(permission[0], permission[1])(request, response, next)) })
 
-app.get('/api/health', (_request, response) => response.json({ status: 'ok', service: 'nexora-api', database: 'sqlite' }))
+app.get('/api/health', (_request, response) => response.json({ status: 'ok', service: 'nexora-api', database: process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite local' }))
 
 const MAX_AI_MESSAGE_LENGTH = 500
 const aiModuleMap = {
@@ -271,8 +271,49 @@ function buildFallbackAiAnswer(intent, context) {
   return projectCount > 0 ? `A empresa possui ${projectCount} projeto(s) em andamento.` : 'Não há dados disponíveis para o resumo da empresa.'
 }
 
-app.post('/api/auth/register', async (request, response) => { try { const { companyName, legalName, cnpj, userName, email, password } = request.body; if (!companyName || !userName || !email || !password) return response.status(400).json({ error: 'Empresa, administrador, e-mail e senha são obrigatórios.' }); const companyId = id(); const userId = id(); const passwordHash = await bcrypt.hash(password, 12); await db.transaction(async () => { await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email) VALUES (?, ?, ?, ?, ?)', [companyId, legalName || companyName, companyName, cnpj || null, email]); const role = await db.get('SELECT id FROM roles WHERE name = ?', ['ADMINISTRADOR']); await db.run('INSERT INTO users (id, company_id, name, email, password_hash, job_title) VALUES (?, ?, ?, ?, ?, ?)', [userId, companyId, userName, email.toLowerCase(), passwordHash, 'Administrador']); await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id]); await db.run('INSERT INTO subscriptions (id, company_id, plan) VALUES (?, ?, ?)', [id(), companyId, 'PROFISSIONAL']) }); const user = await db.get('SELECT u.*, r.name AS role FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles r ON r.id = ur.role_id WHERE u.id = ?', [userId]); response.status(201).json({ token: tokenFor(user), user: cleanUser(user, ['*.*']), company: { id: companyId, name: companyName } }) } catch (error) { if (error.message.includes('UNIQUE')) return response.status(409).json({ error: 'Este e-mail já está cadastrado.' }); errorResponse(response, error) } })
-app.post('/api/auth/login', async (request, response) => { try { const user = await db.get('SELECT u.*, r.name AS role FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id WHERE u.email = ? AND u.status = ?', [String(request.body.email || '').toLowerCase(), 'ATIVO']); if (!user || !(await bcrypt.compare(request.body.password || '', user.password_hash))) return response.status(401).json({ error: 'E-mail ou senha inválidos.' }); user.permissions = await permissionsFor(user); const company = await db.get('SELECT id, trade_name AS name FROM companies WHERE id = ?', [user.company_id]); await audit(user, 'LOGIN', 'AUTH', user.id); response.json({ token: tokenFor(user), user: cleanUser(user), company }) } catch (error) { errorResponse(response, error) } })
+app.post('/api/auth/register', async (request, response) => {
+  try {
+    const { companyName, legalName, cnpj, userName, email, password } = request.body || {}
+    const normalizedEmail = String(email || '').trim().toLowerCase()
+    const normalizedCompany = String(companyName || '').trim()
+    const normalizedName = String(userName || '').trim()
+    if (!normalizedCompany || !normalizedName || !normalizedEmail || !password) return response.status(400).json({ error: 'Empresa, administrador, e-mail e senha são obrigatórios.' })
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return response.status(400).json({ error: 'Informe um endereço de e-mail válido.' })
+    const companyId = id()
+    const userId = id()
+    const passwordHash = await bcrypt.hash(String(password), 12)
+    await db.transaction(async () => {
+      await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email) VALUES (?, ?, ?, ?, ?)', [companyId, legalName || normalizedCompany, normalizedCompany, cnpj || null, normalizedEmail])
+      const role = await db.get('SELECT id FROM roles WHERE name = ?', ['ADMINISTRADOR'])
+      await db.run('INSERT INTO users (id, company_id, name, email, password_hash, job_title) VALUES (?, ?, ?, ?, ?, ?)', [userId, companyId, normalizedName, normalizedEmail, passwordHash, 'Administrador'])
+      await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
+      await db.run('INSERT INTO subscriptions (id, company_id, plan) VALUES (?, ?, ?)', [id(), companyId, 'PROFISSIONAL'])
+    })
+    const user = await db.get('SELECT u.*, r.name AS role FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles r ON r.id = ur.role_id WHERE u.id = ?', [userId])
+    response.status(201).json({ token: tokenFor(user), user: cleanUser(user, ['*.*']), company: { id: companyId, name: normalizedCompany } })
+  } catch (error) {
+    if (error.message.includes('UNIQUE')) return response.status(409).json({ error: 'Este e-mail já está cadastrado nesta empresa.' })
+    errorResponse(response, error)
+  }
+})
+app.post('/api/auth/login', async (request, response) => {
+  try {
+    const email = String(request.body?.email || '').trim().toLowerCase()
+    const password = String(request.body?.password || '')
+    if (!email || !password) return response.status(401).json({ error: 'E-mail ou senha inválidos.' })
+    const candidates = await db.all("SELECT u.*, (SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id ORDER BY CASE r.name WHEN 'ADMINISTRADOR' THEN 0 ELSE 1 END LIMIT 1) AS role FROM users u WHERE lower(trim(u.email)) = ? AND u.status = ? ORDER BY u.created_at ASC", [email, 'ATIVO'])
+    let user = null
+    for (const candidate of candidates) {
+      if (await bcrypt.compare(password, candidate.password_hash)) { user = candidate; break }
+    }
+    if (!user) return response.status(401).json({ error: 'E-mail ou senha inválidos.' })
+    user.permissions = await permissionsFor(user)
+    const company = await db.get('SELECT id, trade_name AS name FROM companies WHERE id = ?', [user.company_id])
+    if (!company) return response.status(401).json({ error: 'E-mail ou senha inválidos.' })
+    await audit(user, 'LOGIN', 'AUTH', user.id)
+    response.json({ token: tokenFor(user), user: cleanUser(user), company })
+  } catch (error) { errorResponse(response, error) }
+})
 app.post('/api/auth/change-password', auth, async (request, response) => { try { const passwordHash = await bcrypt.hash(request.body.password, 12); await db.run('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [passwordHash, request.user.id, request.user.company_id]); response.json({ ok: true }) } catch (error) { errorResponse(response, error) } })
 
 app.get('/api/dashboard', auth, async (request, response) => { try { const companyId = request.user.company_id; const [projects, field, payable, receivable, stock, maintenance, purchases, documents, transactions] = await Promise.all([db.get("SELECT COUNT(*) AS total FROM projects WHERE company_id = ? AND status NOT IN ('FINALIZADO', 'CANCELADO')", [companyId]), db.get("SELECT COUNT(*) AS total FROM field_activities WHERE company_id = ? AND status = 'AGENDADA'", [companyId]), db.get("SELECT COALESCE(SUM(amount), 0) AS total FROM accounts_payable WHERE company_id = ? AND status = 'PENDENTE'", [companyId]), db.get("SELECT COALESCE(SUM(amount), 0) AS total FROM accounts_receivable WHERE company_id = ? AND status = 'PENDENTE'", [companyId]), db.get('SELECT COALESCE(SUM(quantity), 0) AS total, COALESCE(SUM(reserved_quantity), 0) AS reserved FROM inventory WHERE company_id = ?', [companyId]), db.get("SELECT COUNT(*) AS total FROM maintenance_records WHERE company_id = ? AND status IN ('AGENDADA', 'EM_ANDAMENTO')", [companyId]), db.get("SELECT COUNT(*) AS total FROM purchase_requests WHERE company_id = ? AND status NOT IN ('APROVADA', 'CANCELADA')", [companyId]), db.get('SELECT COUNT(*) AS total FROM documents WHERE company_id = ? AND archived = 0', [companyId]), db.get("SELECT COALESCE(SUM(CASE WHEN type = 'ENTRADA' THEN amount ELSE 0 END), 0) AS income, COALESCE(SUM(CASE WHEN type = 'SAIDA' THEN amount ELSE 0 END), 0) AS expense FROM financial_transactions WHERE company_id = ? AND status = 'CONFIRMADA'", [companyId])]); response.json({ stats: [{ label: 'Projetos em andamento', value: String(projects.total), detail: 'Dados atualizados agora', tone: 'blue', icon: 'Factory' }, { label: 'Obras em campo', value: String(field.total), detail: 'Atividades agendadas', tone: 'orange', icon: 'Truck' }, { label: 'Estoque comprometido', value: `${stock.total ? Math.round((stock.reserved / stock.total) * 100) : 0}%`, detail: 'Reservas reais', tone: 'green', icon: 'Warehouse' }, { label: 'A receber', value: `R$ ${Number(receivable.total).toLocaleString('pt-BR')}`, detail: 'Contas pendentes', tone: 'purple', icon: 'ClipboardList' }], financial: { payable: payable.total, receivable: receivable.total, income: transactions.income, expense: transactions.expense, result: transactions.income - transactions.expense }, operational: { openMaintenance: maintenance.total, pendingPurchases: purchases.total, documents: documents.total }, companyId }) } catch (error) { errorResponse(response, error) } })

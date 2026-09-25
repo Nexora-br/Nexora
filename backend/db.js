@@ -38,10 +38,25 @@ function postgresDatabase() {
 	}
 	return {
 		exec(sql) { enqueuePostgres(() => postgresPool.query(postgresSql(sql))).catch((error) => console.error(error)) },
-		run(sql, params, callback) { execute(sql, params).then((result) => callback.call({ lastID: null, changes: result.rowCount }, null), (error) => callback.call({ lastID: null, changes: 0 }, error)); return this },
-		get(sql, params, callback) { execute(sql, params).then((result) => callback(null, result.rows[0]), callback); return this },
-		all(sql, params, callback) { execute(sql, params).then((result) => callback(null, result.rows), callback); return this },
-		close(callback) { postgresPool.end().then(() => callback(null), callback) },
+		run(sql, params, callback) {
+			if (typeof params === 'function') { callback = params; params = [] }
+			execute(sql, params || []).then(
+				(result) => callback?.call({ lastID: null, changes: result.rowCount }, null),
+				(error) => { if (callback) callback.call({ lastID: null, changes: 0 }, error); else console.error(error) },
+			)
+			return this
+		},
+		get(sql, params, callback) {
+			if (typeof params === 'function') { callback = params; params = [] }
+			execute(sql, params || []).then((result) => callback?.(null, result.rows[0]), (error) => { if (callback) callback(error); else console.error(error) })
+			return this
+		},
+		all(sql, params, callback) {
+			if (typeof params === 'function') { callback = params; params = [] }
+			execute(sql, params || []).then((result) => callback?.(null, result.rows), (error) => { if (callback) callback(error); else console.error(error) })
+			return this
+		},
+		close(callback) { postgresPool.end().then(() => callback?.(null), (error) => { if (callback) callback(error); else console.error(error) }) },
 	}
 }
 
