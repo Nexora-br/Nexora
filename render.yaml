@@ -5,7 +5,7 @@ services:
     plan: free
     autoDeploy: true
     rootDir: backend
-    buildCommand: npm install
+    buildCommand: npm_config_build_from_source=sqlite3 npm install
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
