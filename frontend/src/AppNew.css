@@ -249,6 +249,12 @@ button, input, select, textarea { font-family: inherit; }
 .work-diary-detail .modal-actions > span { flex: 1; }
 .employee-privacy-note { display:flex; align-items:center; gap:9px; padding:11px 14px; border:1px solid #dcebf0; border-radius:8px; margin:-7px 0 16px; color:#53798b; background:#f5fafc; font-size:11px; }
 .nexora-nav { max-height:calc(100vh - 245px); overflow-y:auto; scrollbar-width:thin; }
+.nexora-nav { align-items:stretch; gap:0; }
+.nav-group { display:flex; flex:0 0 auto; flex-direction:column; gap:3px; padding:0 0 11px; margin:0 0 9px; border-bottom:1px solid rgba(144,190,208,.15); }
+.nav-group .nav-label { padding:0 12px 6px; color:#79a9bc; font-size:8px; letter-spacing:.14em; }
+.nav-group button { flex:0 0 auto; }
+.nav-account-group { padding-bottom:0; margin-bottom:0; border-bottom:0; }
+.nav-account-group .nav-label { padding-top:2px; }
 .employee-privacy-note svg { flex:0 0 auto; color:#4287a2; }
 .employee-toolbar { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:12px 16px; margin-bottom:17px; }
 .employee-toolbar .search-box { flex:1; max-width:390px; }

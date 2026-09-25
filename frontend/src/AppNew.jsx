@@ -16,17 +16,27 @@ import { EmployeesPage } from './EmployeesPage'
 import { TeamsPage } from './TeamsPage'
 import { API_URL } from './apiConfig'
 
-const menuItems = [
-  { label: 'Visão geral', icon: LayoutDashboard }, { label: 'Projetos e obras', icon: Factory },
-  { label: 'Diário de Obra', icon: ClipboardList }, { label: 'Funcionários', icon: UsersRound },
-  { label: 'Tarefas', icon: ClipboardList }, { label: 'Agenda de campo', icon: CalendarDays },
-  { label: 'Equipes', icon: UsersRound }, { label: 'Equipamentos', icon: Wrench },
-  { label: 'Leads e CRM', icon: Handshake }, { label: 'Clientes', icon: Users },
-  { label: 'Orçamentos e propostas', icon: ReceiptText }, { label: 'Contratos', icon: FileText },
-  { label: 'Estoque', icon: Package }, { label: 'Compras', icon: ShoppingCart },
-  { label: 'Fornecedores', icon: UsersRound }, { label: 'Financeiro', icon: WalletCards },
-  { label: 'Documentos', icon: FileText }, { label: 'Relatórios', icon: BarChart3 },
-  { label: 'Nexora AI', icon: Bot },
+const menuGroups = [
+  { title: 'INÍCIO', items: [{ label: 'Visão geral', icon: LayoutDashboard }] },
+  { title: 'OBRAS E OPERAÇÃO', items: [
+    { label: 'Projetos e obras', icon: Factory }, { label: 'Diário de Obra', icon: ClipboardList },
+    { label: 'Equipes', icon: UsersRound }, { label: 'Tarefas', icon: ClipboardList },
+    { label: 'Agenda de campo', icon: CalendarDays }, { label: 'Equipamentos', icon: Wrench },
+  ] },
+  { title: 'PESSOAS', items: [{ label: 'Funcionários', icon: UsersRound }] },
+  { title: 'SUPRIMENTOS', items: [
+    { label: 'Estoque', icon: Package }, { label: 'Compras', icon: ShoppingCart },
+    { label: 'Fornecedores', icon: UsersRound },
+  ] },
+  { title: 'COMERCIAL', items: [
+    { label: 'Leads e CRM', icon: Handshake }, { label: 'Clientes', icon: Users },
+    { label: 'Orçamentos e propostas', icon: ReceiptText }, { label: 'Contratos', icon: FileText },
+  ] },
+  { title: 'FINANCEIRO', items: [{ label: 'Financeiro', icon: WalletCards }] },
+  { title: 'GESTÃO E ANÁLISE', items: [
+    { label: 'Documentos', icon: FileText }, { label: 'Relatórios', icon: BarChart3 },
+    { label: 'Nexora AI', icon: Bot },
+  ] },
 ]
 const iconComponents = { Factory, Truck, Warehouse, ClipboardList, LayoutDashboard, Package, CalendarDays, Users, UsersRound, Wrench, Handshake, ReceiptText, FileText, ShoppingCart, WalletCards, BarChart3, Bot, Bell }
 const rowsFrom = (result) => {
@@ -231,7 +241,11 @@ function AppNew() {
     <aside className={`nexora-sidebar ${sidebarOpen ? 'open' : ''}`}>
       <div className="nexora-brand"><img src="/logo_sem_fundo.png" alt="Nexora" /><span>gestão inteligente para obras</span></div>
       <div className="company-switcher"><div className="company-avatar">{companyInitials}</div><div><strong>{session.companyName}</strong><small>Plano profissional</small></div><ChevronDown size={15} /></div>
-      <nav className="nexora-nav"><span className="nav-label">TODOS OS MÓDULOS</span>{menuItems.filter(({ label }) => (label !== 'Funcionários' || can('employees', 'view')) && (label !== 'Equipes' || can('teams', 'view'))).map(({ label, icon: Icon }) => <button key={label} aria-label={label === 'Nexora AI' ? 'Nexora AI' : undefined} className={activeMenu === label ? 'selected' : ''} onClick={() => { setActiveMenu(label); setSidebarOpen(false) }}><Icon size={18} />{label === 'Nexora AI' ? null : <span>{label}</span>}{label === 'Projetos e obras' && <b>{projects.length}</b>}</button>)}<span className="nav-label admin-label">SUA CONTA</span><button className={activeMenu === 'Configurações' ? 'selected' : ''} onClick={() => setActiveMenu('Configurações')}><Settings2 size={18} /><span>Configurações</span></button><button className={activeMenu === 'Ajuda' ? 'selected' : ''} onClick={() => setActiveMenu('Ajuda')}><CircleHelp size={18} /><span>Central de ajuda</span></button></nav>
+      <nav className="nexora-nav">{menuGroups.map((group) => {
+        const items = group.items.filter(({ label }) => (label !== 'Funcionários' || can('employees', 'view')) && (label !== 'Equipes' || can('teams', 'view')))
+        if (!items.length) return null
+        return <section className="nav-group" key={group.title}><span className="nav-label">{group.title}</span>{items.map(({ label, icon: Icon }) => <button key={label} aria-label={label === 'Nexora AI' ? 'Nexora AI' : undefined} className={activeMenu === label ? 'selected' : ''} onClick={() => { setActiveMenu(label); setSidebarOpen(false) }}><Icon size={18} />{label === 'Nexora AI' ? null : <span>{label}</span>}{label === 'Projetos e obras' && <b>{projects.length}</b>}</button>)}</section>
+      })}<section className="nav-group nav-account-group"><span className="nav-label">SUA CONTA</span><button className={activeMenu === 'Configurações' ? 'selected' : ''} onClick={() => { setActiveMenu('Configurações'); setSidebarOpen(false) }}><Settings2 size={18} /><span>Configurações</span></button><button className={activeMenu === 'Ajuda' ? 'selected' : ''} onClick={() => { setActiveMenu('Ajuda'); setSidebarOpen(false) }}><CircleHelp size={18} /><span>Central de ajuda</span></button></section></nav>
       <div className="profile"><div className="user-avatar">{initials}</div><div><strong>{session.userName}</strong><small>Administrador</small></div><button title="Sair" onClick={logout}><LogOut size={15} /></button></div>
     </aside>
     <main className="nexora-main">
