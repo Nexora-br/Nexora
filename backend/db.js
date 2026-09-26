@@ -1,9 +1,9 @@
 const path = require('path')
-const sqlite3 = require('sqlite3').verbose()
 const { Pool } = require('pg')
 const { AsyncLocalStorage } = require('async_hooks')
 
 const usingPostgres = Boolean(process.env.DATABASE_URL)
+const sqlite3 = usingPostgres ? null : require('sqlite3').verbose()
 const transactionContext = new AsyncLocalStorage()
 const postgresPool = usingPostgres ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined }) : null
 let postgresReady = Promise.resolve()
