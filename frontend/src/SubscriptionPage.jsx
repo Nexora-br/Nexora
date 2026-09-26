@@ -17,7 +17,6 @@ export function SubscriptionPage({ session, can }) {
   const isAdmin = session.role === 'ADMINISTRADOR'
 
   const load = useCallback(async () => {
-    setError('')
     try {
       const response = await fetch(`${API_URL}/subscription`, { headers: { Authorization: `Bearer ${session.token}` } })
       const result = await response.json()
@@ -26,6 +25,8 @@ export function SubscriptionPage({ session, can }) {
     } catch (loadError) { setError(loadError.message || 'Não foi possível carregar a assinatura.') } finally { setLoading(false) }
   }, [session.token])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
+  // oxlint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { void load() }, [load])
 
   async function perform(path, body, success) {
@@ -41,7 +42,7 @@ export function SubscriptionPage({ session, can }) {
   const current = data?.subscription
   const canManage = isAdmin && can('subscriptions', 'create')
   return <>
-    <div className="section-heading"><div><span className="section-kicker">GESTÃO DA CONTA</span><h1>Assinaturas</h1><p>Consulte o plano e acompanhe o estado da assinatura desta empresa.</p></div><button className="outline-button" onClick={() => { setLoading(true); void load() }} disabled={loading}><RefreshCw size={15} /> Atualizar</button></div>
+    <div className="section-heading"><div><span className="section-kicker">GESTÃO DA CONTA</span><h1>Assinaturas</h1><p>Consulte o plano e acompanhe o estado da assinatura desta empresa.</p></div><button className="outline-button" onClick={() => { setError(''); setLoading(true); void load() }} disabled={loading}><RefreshCw size={15} /> Atualizar</button></div>
     <div className="subscription-banner"><ShieldCheck size={19} /><span>Ambiente de testes: todas as operações são fictícias. Nenhuma cobrança é realizada. Não informe número, validade ou código de segurança do cartão.</span></div>
     {error && <div className="form-error" role="alert">{error}</div>}{message && <div className="subscription-success" role="status"><CheckCircle2 size={16} />{message}</div>}
     {loading ? <div className="panel data-state"><p>Carregando assinatura…</p></div> : <>
