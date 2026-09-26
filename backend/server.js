@@ -643,10 +643,10 @@ app.post('/api/company-access-requests/:id/decision', auth, requireAdministrator
     if (existing) return response.status(409).json({ error: 'Este e-mail já possui uma conta nesta empresa.' })
     const userId = id()
     await db.transaction(async () => {
-      const claim = await db.run("UPDATE company_access_requests SET status = 'APROVADA', password_hash = '', linked_user_id = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ? AND status = 'PENDENTE'", [userId, request.user.id, accessRequest.id, request.user.company_id])
-      if (!claim.changes) throw new Error('Este pedido já foi analisado.')
       await db.run('INSERT INTO users (id, company_id, name, email, password_hash, phone, job_title) VALUES (?, ?, ?, ?, ?, ?, ?)', [userId, request.user.company_id, accessRequest.name, accessRequest.email, accessRequest.password_hash, accessRequest.phone, accessRequest.job_title])
       await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
+      const claim = await db.run("UPDATE company_access_requests SET status = 'APROVADA', password_hash = '', linked_user_id = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ? AND status = 'PENDENTE'", [userId, request.user.id, accessRequest.id, request.user.company_id])
+      if (!claim.changes) throw new Error('Este pedido já foi analisado.')
     })
     await audit(request.user, 'APROVAR_ACESSO', 'SOLICITACOES_ENTRADA', accessRequest.id, { status: 'PENDENTE' }, { status: 'APROVADA', user_id: userId, role: role.name })
     response.json({ id: accessRequest.id, status: 'APROVADA', user_id: userId, role: role.name })
