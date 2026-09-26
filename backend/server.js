@@ -12,6 +12,7 @@ const createCrudRoutes = require('./crud-routes')
 const createWorkDiaryRoutes = require('./work-diary-routes')
 const createEmployeeRoutes = require('./employee-routes')
 const createTeamRoutes = require('./team-routes')
+const createTaskRoutes = require('./task-routes')
 const { createAiProvider } = require('./ai-provider')
 
 const app = express()
@@ -467,7 +468,7 @@ app.get('/api/dashboard/overview', auth, async (request, response) => {
       db.get("SELECT COUNT(*) AS total FROM maintenance_records WHERE company_id = ? AND status IN ('AGENDADA', 'EM_ANDAMENTO')", [companyId]),
       db.get("SELECT COUNT(*) AS total FROM purchase_requests WHERE company_id = ? AND status NOT IN ('APROVADA', 'CANCELADA', 'RECEBIDA')", [companyId]),
       db.get('SELECT COUNT(*) AS total FROM documents WHERE company_id = ? AND archived = 0', [companyId]),
-      db.get("SELECT COUNT(*) AS total FROM tasks WHERE company_id = ? AND status NOT IN ('CONCLUIDA', 'CANCELADA')", [companyId]),
+      db.get("SELECT COUNT(*) AS total FROM tasks WHERE company_id = ? AND created_by IS NULL AND archived = 0 AND status NOT IN ('CONCLUIDA', 'CANCELADA')", [companyId]),
       db.get("SELECT COUNT(*) AS total FROM projects WHERE company_id = ? AND status NOT IN ('FINALIZADO', 'CANCELADO') AND end_date IS NOT NULL AND date(end_date) < date('now')", [companyId]),
       db.all("SELECT id, title, type, starts_at, status FROM field_activities WHERE company_id = ? AND status = 'AGENDADA' AND starts_at IS NOT NULL AND datetime(starts_at) >= datetime('now') ORDER BY starts_at ASC LIMIT 5", [companyId]),
       db.all('SELECT i.id, p.name AS product_name, i.quantity, p.min_stock, p.unit FROM inventory i JOIN products p ON p.id = i.product_id WHERE i.company_id = ? AND i.quantity <= p.min_stock ORDER BY i.quantity ASC LIMIT 5', [companyId]),
@@ -497,41 +498,13 @@ app.get('/api/dashboard/overview', auth, async (request, response) => {
   } catch (error) { errorResponse(response, error) }
 })
 
-app.get('/api/tasks', auth, requirePermission('tasks', 'view'), async (request, response) => {
-  try {
-    const page = Math.max(1, Number.parseInt(request.query.page, 10) || 1)
-    const pageSize = Math.min(100, Math.max(1, Number.parseInt(request.query.pageSize, 10) || 20))
-    const params = [request.user.company_id]
-    const where = ['t.company_id = ?', 't.archived = 0']
-    if (request.query.search) { const term = `%${request.query.search}%`; where.push('(t.title LIKE ? OR t.description LIKE ? OR t.responsible LIKE ?)'); params.push(term, term, term) }
-    if (request.query.status) { where.push('t.status = ?'); params.push(request.query.status) }
-    if (request.query.priority) { where.push('t.priority = ?'); params.push(request.query.priority) }
-    if (request.query.project_id) { where.push('t.project_id = ?'); params.push(request.query.project_id) }
-    if (request.query.responsible) { where.push('t.responsible = ?'); params.push(request.query.responsible) }
-    if (request.query.from) { where.push('date(t.due_date) >= date(?)'); params.push(request.query.from) }
-    if (request.query.to) { where.push('date(t.due_date) <= date(?)'); params.push(request.query.to) }
-    const sortFields = ['title', 'status', 'priority', 'due_date', 'created_at', 'updated_at']
-    const sort = sortFields.includes(request.query.sort) ? request.query.sort : 'created_at'
-    const direction = request.query.direction === 'asc' ? 'ASC' : 'DESC'
-    const count = await db.get(`SELECT COUNT(*) AS total FROM tasks t WHERE ${where.join(' AND ')}`, params)
-    const rows = await db.all(`SELECT t.*, p.name AS project_name FROM tasks t LEFT JOIN projects p ON p.id = t.project_id AND p.company_id = t.company_id WHERE ${where.join(' AND ')} ORDER BY t.${sort} ${direction} LIMIT ? OFFSET ?`, [...params, pageSize, (page - 1) * pageSize])
-    response.json({ data: rows, pagination: { page, pageSize, total: count.total, totalPages: Math.ceil(count.total / pageSize) } })
-  } catch (error) { errorResponse(response, error) }
-})
-app.get('/api/tasks/:id', auth, requirePermission('tasks', 'view'), async (request, response) => { try { const task = await db.get('SELECT t.*, p.name AS project_name FROM tasks t LEFT JOIN projects p ON p.id = t.project_id AND p.company_id = t.company_id WHERE t.id = ? AND t.company_id = ?', [request.params.id, request.user.company_id]); if (!task) return response.status(404).json({ error: 'Tarefa não encontrada.' }); response.json(task) } catch (error) { errorResponse(response, error) } })
-app.post('/api/tasks', auth, requirePermission('tasks', 'create'), async (request, response) => { try { const body = request.body || {}; if (!body.title) return response.status(400).json({ error: 'Título da tarefa é obrigatório.' }); const task = { id: id(), project_id: body.project_id || null, title: body.title, responsible: body.responsible || null, due_date: body.due_date || null, status: body.status || 'PENDENTE', priority: body.priority || 'MEDIA', description: body.description || null, archived: 0 }; await db.run('INSERT INTO tasks (id, company_id, project_id, title, responsible, due_date, status, priority, description, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [task.id, request.user.company_id, task.project_id, task.title, task.responsible, task.due_date, task.status, task.priority, task.description, task.archived]); const created = await db.get('SELECT * FROM tasks WHERE id = ? AND company_id = ?', [task.id, request.user.company_id]); await audit(request.user, 'CRIAR', 'TAREFAS', task.id, null, created); response.status(201).json(created) } catch (error) { errorResponse(response, error) } })
-app.put('/api/tasks/:id', auth, requirePermission('tasks', 'edit'), async (request, response) => { try { const previous = await db.get('SELECT * FROM tasks WHERE id = ? AND company_id = ? AND archived = 0', [request.params.id, request.user.company_id]); if (!previous) return response.status(404).json({ error: 'Tarefa não encontrada.' }); const next = { ...previous, ...request.body }; await db.run('UPDATE tasks SET project_id = ?, title = ?, responsible = ?, due_date = ?, status = ?, priority = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [next.project_id || null, next.title, next.responsible || null, next.due_date || null, next.status, next.priority, next.description || null, request.params.id, request.user.company_id]); const updated = await db.get('SELECT * FROM tasks WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); await audit(request.user, 'EDITAR', 'TAREFAS', request.params.id, previous, updated); response.json(updated) } catch (error) { errorResponse(response, error) } })
-app.patch('/api/tasks/:id/status', auth, requirePermission('tasks', 'edit'), async (request, response) => { try { const status = request.body?.status; if (!['PENDENTE', 'EM_ANDAMENTO', 'CONCLUIDA', 'CANCELADA'].includes(status)) return response.status(400).json({ error: 'Status inválido.' }); const previous = await db.get('SELECT * FROM tasks WHERE id = ? AND company_id = ? AND archived = 0', [request.params.id, request.user.company_id]); if (!previous) return response.status(404).json({ error: 'Tarefa não encontrada.' }); await db.run('UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [status, request.params.id, request.user.company_id]); const updated = { ...previous, status }; await audit(request.user, status === 'CONCLUIDA' ? 'CONCLUIR' : status === 'PENDENTE' && previous.status === 'CONCLUIDA' ? 'REABRIR' : 'ALTERAR_STATUS', 'TAREFAS', request.params.id, previous, updated); response.json(updated) } catch (error) { errorResponse(response, error) } })
-app.post('/api/tasks/:id/archive', auth, requirePermission('tasks', 'archive'), async (request, response) => { try { const previous = await db.get('SELECT * FROM tasks WHERE id = ? AND company_id = ? AND archived = 0', [request.params.id, request.user.company_id]); if (!previous) return response.status(404).json({ error: 'Tarefa não encontrada.' }); await db.run('UPDATE tasks SET archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); await audit(request.user, 'ARQUIVAR', 'TAREFAS', request.params.id, previous, { ...previous, archived: 1 }); response.json({ ok: true }) } catch (error) { errorResponse(response, error) } })
-app.delete('/api/tasks/:id', auth, requirePermission('tasks', 'delete'), async (request, response) => { try { const previous = await db.get('SELECT * FROM tasks WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!previous) return response.status(404).json({ error: 'Tarefa não encontrada.' }); await db.run('DELETE FROM tasks WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); await audit(request.user, 'EXCLUIR', 'TAREFAS', request.params.id, previous, null); response.status(204).end() } catch (error) { errorResponse(response, error) } })
-
 app.get('/api/projects/:id/overview', auth, requirePermission('projects', 'view'), async (request, response) => {
   try {
     const companyId = request.user.company_id
     const project = await db.get('SELECT p.*, c.legal_name AS client_name FROM projects p LEFT JOIN clients c ON c.id = p.client_id AND c.company_id = p.company_id WHERE p.id = ? AND p.company_id = ?', [request.params.id, companyId])
     if (!project) return response.status(404).json({ error: 'Projeto não encontrado.' })
     const [tasks, documents, payables, receivables, audit] = await Promise.all([
-      db.all('SELECT * FROM tasks WHERE project_id = ? AND company_id = ? AND archived = 0 ORDER BY due_date ASC, created_at DESC', [project.id, companyId]),
+      db.all('SELECT * FROM tasks WHERE project_id = ? AND company_id = ? AND archived = 0 AND created_by IS NULL ORDER BY due_date ASC, created_at DESC', [project.id, companyId]),
       db.all("SELECT id, name, category, size, mime_type, created_at, uploaded_by FROM documents WHERE related_id = ? AND company_id = ? AND archived = 0 ORDER BY created_at DESC", [project.id, companyId]),
       request.user.role === 'ADMINISTRADOR' || (request.user.permissions || []).includes('*.*') || (request.user.permissions || []).includes('finance.view') ? db.all('SELECT id, description, amount, due_date, status FROM accounts_payable WHERE project_id = ? AND company_id = ? ORDER BY due_date ASC', [project.id, companyId]) : Promise.resolve([]),
       request.user.role === 'ADMINISTRADOR' || (request.user.permissions || []).includes('*.*') || (request.user.permissions || []).includes('finance.view') ? db.all('SELECT id, description, amount, due_date, status FROM accounts_receivable WHERE project_id = ? AND company_id = ? ORDER BY due_date ASC', [project.id, companyId]) : Promise.resolve([]),
@@ -645,6 +618,7 @@ app.get('/api/access-audit', auth, requireAdministrator, async (request, respons
 
 app.use(createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, supabase, ensureStorageBucket }))
 app.use(createTeamRoutes({ db, auth, requirePermission, audit }))
+app.use(createTaskRoutes({ db, auth, requirePermission, audit }))
 app.use(createCrudRoutes({ db, auth, requireRole, audit }))
 app.use(createWorkDiaryRoutes({ db, auth, requirePermission, audit, uploadRoot, supabase, ensureStorageBucket }))
 
