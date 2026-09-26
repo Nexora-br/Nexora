@@ -360,3 +360,29 @@ button, input, select, textarea { font-family: inherit; }
 @media (max-width: 760px) { .work-diary-toolbar { flex-wrap: wrap; }.work-diary-project-select { flex-basis: calc(100% - 60px); }.work-diary-count { margin-left: 52px; }.work-diary-row { align-items: flex-start; flex-wrap: wrap; }.work-diary-row-main { flex-basis: calc(100% - 60px); }.work-diary-row-actions { width: 100%; justify-content: flex-start; margin-left: 54px; }.work-diary-choice { grid-template-columns: 1fr; }.work-diary-detail-grid { grid-template-columns: 1fr; }.work-diary-modal .form-grid { grid-template-columns: 1fr; } }
 @keyframes ai-message-in { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 760px) { .ai-chat-panel { min-height: calc(100vh - 300px); border-radius: 17px; }.ai-chat-thread { min-height: 320px; padding: 22px 17px; }.ai-empty-state { min-height: 280px; }.ai-message { max-width: 92%; }.ai-chat-form { margin: 0 12px 12px; }.ai-chat-panel > .form-error { margin-inline: 14px; } }
+
+/* Keep every page within the viewport; content reflows vertically instead of scrolling sideways. */
+html, body, #root { width:100%; max-width:100%; overflow-x:clip; }
+.nexora-shell, .nexora-main, .workspace-content, .page-panel, .panel { min-width:0; max-width:100%; }
+.workspace-content table, .table-scroll table, .permission-matrix table { width:100%; min-width:0; table-layout:fixed; }
+.table-scroll, .table-wrap, .permission-matrix { width:100%; max-width:100%; overflow-x:clip; }
+.admin-tabs, .ai-suggestions, .purchase-flow, .finance-tabs { flex-wrap:wrap; overflow-x:visible; white-space:normal; }
+.admin-tabs button, .finance-tabs button { white-space:normal; }
+.purchase-flow { row-gap:6px; }
+.workspace-content th, .workspace-content td, .permission-matrix th, .permission-matrix td { overflow-wrap:anywhere; word-break:break-word; white-space:normal; }
+.row-actions { flex-wrap:wrap; }
+.filter-bar, .section-heading, .panel-heading { min-width:0; }
+@media (max-width:760px) {
+  .workspace-content table, .table-scroll table, .permission-matrix table { min-width:0; font-size:8px; }
+  .workspace-content th, .workspace-content td, .permission-matrix th, .permission-matrix td { padding:7px 4px; font-size:8px; }
+  .permission-matrix th:first-child, .permission-matrix td:first-child { position:static; min-width:0; }
+  .permission-cell { width:22px; height:22px; }
+  .filter-bar, .section-heading, .panel-heading { flex-wrap:wrap; }
+  .section-heading > .blue-button, .section-heading > .outline-button { max-width:100%; white-space:normal; }
+  .metric-grid, .metric-grid.three, .document-grid, .supplier-summary, .calendar-layout, .module-layout, .ai-layout { grid-template-columns:minmax(0,1fr); }
+  .purchase-flow { gap:4px; padding:10px; font-size:9px; }
+  .purchase-flow span { padding:5px 7px; }
+  .ai-suggestions button { max-width:100%; white-space:normal; }
+  .modal-card { width:min(100%,560px); max-width:100%; padding:22px 16px; }
+  .modal-layer { padding:12px; }
+}
