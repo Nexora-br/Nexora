@@ -7,7 +7,7 @@ const methodLabels = { CARTAO: 'Cartão (simulação)', PIX: 'PIX (simulação)'
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString('pt-BR') : '—'
 const moneyLabel = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-export function SubscriptionPage({ session, can }) {
+export function SubscriptionPage({ session, can, required = false, onActivated }) {
   const [data, setData] = useState(null)
   const [method, setMethod] = useState('PIX')
   const [loading, setLoading] = useState(true)
@@ -36,13 +36,14 @@ export function SubscriptionPage({ session, can }) {
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Não foi possível concluir a simulação.')
       setData(result); setMessage(success)
+      if (result.subscription?.status === 'ATIVA') onActivated?.()
     } catch (actionError) { setError(actionError.message || 'Não foi possível concluir a simulação.') } finally { setSaving(false) }
   }
 
   const current = data?.subscription
   const canManage = isAdmin && can('subscriptions', 'create')
   return <>
-    <div className="section-heading"><div><span className="section-kicker">GESTÃO DA CONTA</span><h1>Assinaturas</h1><p>Consulte o plano e acompanhe o estado da assinatura desta empresa.</p></div><button className="outline-button" onClick={() => { setError(''); setLoading(true); void load() }} disabled={loading}><RefreshCw size={15} /> Atualizar</button></div>
+    <div className="section-heading"><div><span className="section-kicker">{required ? 'ATIVAÇÃO DA EMPRESA' : 'GESTÃO DA CONTA'}</span><h1>{required ? 'Ative seu acesso à Nexora' : 'Assinaturas'}</h1><p>{required ? 'Para continuar, a empresa precisa ativar o plano Nexora Pro.' : 'Consulte o plano e acompanhe o estado da assinatura desta empresa.'}</p></div>{!required && <button className="outline-button" onClick={() => { setError(''); setLoading(true); void load() }} disabled={loading}><RefreshCw size={15} /> Atualizar</button>}</div>
     <div className="subscription-banner"><ShieldCheck size={19} /><span>Ambiente de testes: todas as operações são fictícias. Nenhuma cobrança é realizada. Não informe número, validade ou código de segurança do cartão.</span></div>
     {error && <div className="form-error" role="alert">{error}</div>}{message && <div className="subscription-success" role="status"><CheckCircle2 size={16} />{message}</div>}
     {loading ? <div className="panel data-state"><p>Carregando assinatura…</p></div> : <>

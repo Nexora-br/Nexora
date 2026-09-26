@@ -86,6 +86,17 @@ describe('autenticação', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('leva da apresentação à página de planos e depois ao cadastro', async () => {
+    const user = userEvent.setup()
+    render(<AppNew />)
+    await user.click(screen.getByRole('button', { name: 'Planos' }))
+    expect(screen.getByRole('heading', { name: 'Nexora Pro' })).toBeInTheDocument()
+    expect(screen.getByText(/R\$ 500/)).toBeInTheDocument()
+    expect(screen.getByText('PIX')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Selecionar plano/ }))
+    expect(screen.getByRole('heading', { name: 'Cadastre sua empresa' })).toBeInTheDocument()
+  })
+
   it('faz login real via API e persiste a sessão', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ token: 'token-real', user: { id: 'u1', name: 'João', email: 'joao@test', role: 'ADMINISTRADOR', permissions: ['*.*'], companyId: 'c1' }, company: { name: 'Empresa Real' } }))

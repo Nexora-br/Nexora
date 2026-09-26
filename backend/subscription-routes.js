@@ -62,7 +62,7 @@ function createSubscriptionRoutes({ express, db, auth, requirePermission, requir
     return { subscription, payments, plan: { id: PLAN, name: 'Nexora Pro', amount: MONTHLY_AMOUNT, currency: 'BRL', interval: 'month' } }
   }
 
-  router.get('/api/subscription', auth, requirePermission('subscriptions', 'view'), requireSimulator, async (request, response) => {
+  router.get('/api/subscription', auth, requireSimulator, async (request, response) => {
     try { response.json(await responseData(request.user.company_id)) } catch (error) { console.error(error); response.status(500).json({ error: 'Não foi possível carregar a assinatura.' }) }
   })
 

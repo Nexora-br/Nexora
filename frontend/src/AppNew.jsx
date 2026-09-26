@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   ArrowRight, BarChart3, Bell, Bot, CalendarDays, Check, ChevronDown, CircleHelp,
   ClipboardList, Factory, FileText, Handshake, LayoutDashboard, Layers3,
-  LogOut, Menu, Package, Plus, ReceiptText, Search, Settings2, ShoppingCart, Truck,
+  LogOut, Menu, Package, Plus, ReceiptText, Search, Settings2, ShieldCheck, ShoppingCart, Truck,
   Users, UsersRound, WalletCards, Warehouse, Wrench, X,
 } from 'lucide-react'
 import './AppNew.css'
@@ -34,7 +34,7 @@ const menuGroups = [
     { label: 'Leads e CRM', icon: Handshake }, { label: 'Clientes', icon: Users },
     { label: 'Orçamentos e propostas', icon: ReceiptText }, { label: 'Contratos', icon: FileText },
   ] },
-  { title: 'FINANCEIRO', items: [{ label: 'Financeiro', icon: WalletCards }, { label: 'Assinaturas', icon: ReceiptText }] },
+  { title: 'FINANCEIRO', items: [{ label: 'Financeiro', icon: WalletCards }] },
   { title: 'GESTÃO E ANÁLISE', items: [
     { label: 'Documentos', icon: FileText }, { label: 'Relatórios', icon: BarChart3 },
     { label: 'Nexora AI', icon: Bot },
@@ -70,8 +70,11 @@ let visualPageApi = {}
 
 function AppNew() {
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('nexora-session') || 'null'))
+  const billingUiEnabled = (import.meta.env.DEV && import.meta.env.MODE !== 'test') || import.meta.env.VITE_ENABLE_SIMULATED_BILLING === 'true'
+  const [billingGate, setBillingGate] = useState({ token: null, loading: false, active: false, error: '' })
   const [authView, setAuthView] = useState('login')
   const [showAuth, setShowAuth] = useState(false)
+  const [showPlans, setShowPlans] = useState(false)
   const [authError, setAuthError] = useState('')
   const [authInfo, setAuthInfo] = useState('')
   const [activeMenu, setActiveMenu] = useState('Visão geral')
@@ -114,7 +117,20 @@ function AppNew() {
   const [dashboardData, setDashboardData] = useState(null)
 
   useEffect(() => {
-    if (!session?.token) return undefined
+    if (!session?.token || !billingUiEnabled) return undefined
+    let current = true
+    fetch(`${API_URL}/subscription`, { headers: { Authorization: `Bearer ${session.token}` } })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || 'Não foi possível verificar a assinatura da empresa.')
+        if (current) setBillingGate({ token: session.token, loading: false, active: result.subscription?.status === 'ATIVA', error: '' })
+      })
+      .catch((error) => { if (current) setBillingGate({ token: session.token, loading: false, active: false, error: error.message || 'Não foi possível verificar a assinatura.' }) })
+    return () => { current = false }
+  }, [session?.token, billingUiEnabled])
+
+  useEffect(() => {
+    if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined
     const headers = { Authorization: `Bearer ${session.token}` }
     const fetchJson = (url, options = {}) => Promise.resolve(fetch(url, options)).then(async (response) => {
       if (!response) return []
@@ -145,7 +161,7 @@ function AppNew() {
       if (projectResult?.pagination) setProjectPagination(projectResult.pagination)
     }).catch(() => setDataError('Não foi possível carregar os dados.'))
     return undefined
-  }, [session?.token, dataRefresh])
+  }, [session?.token, dataRefresh, billingUiEnabled, billingGate])
 
   useEffect(() => {
     if (!toast) return undefined
@@ -155,7 +171,7 @@ function AppNew() {
 
   // Loaders are declared below; keeping this effect before the auth return preserves hook order.
   // eslint-disable-next-line react/immutability, react-hooks/exhaustive-deps
-  useEffect(() => { if (!session?.token) return undefined; const params = query.trim() ? { search: query.trim(), page: 1 } : { page: 1 }; if (activeMenu === 'Projetos e obras') loadProjects(params); if (activeMenu === 'Clientes') loadClients(params); if (activeMenu === 'Estoque') loadStock(params); if (activeMenu === 'Fornecedores') loadSuppliers(params); if (activeMenu === 'Compras') { loadPurchaseRequests(params); void loadQuotations(params) } if (activeMenu === 'Financeiro') { loadPayables(params); loadReceivables(params) } if (activeMenu === 'Equipamentos') { loadEquipments(params); loadMaintenances(params) } if (activeMenu === 'Agenda de campo') loadAgenda(params); if (activeMenu === 'Documentos') loadDocuments(params); return undefined }, [activeMenu, query, session?.token])
+  useEffect(() => { if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined; const params = query.trim() ? { search: query.trim(), page: 1 } : { page: 1 }; if (activeMenu === 'Projetos e obras') loadProjects(params); if (activeMenu === 'Clientes') loadClients(params); if (activeMenu === 'Estoque') loadStock(params); if (activeMenu === 'Fornecedores') loadSuppliers(params); if (activeMenu === 'Compras') { loadPurchaseRequests(params); void loadQuotations(params) } if (activeMenu === 'Financeiro') { loadPayables(params); loadReceivables(params) } if (activeMenu === 'Equipamentos') { loadEquipments(params); loadMaintenances(params) } if (activeMenu === 'Agenda de campo') loadAgenda(params); if (activeMenu === 'Documentos') loadDocuments(params); return undefined }, [activeMenu, query, session?.token, billingGate, billingUiEnabled])
 
   async function handleLogin(event) {
     event.preventDefault()
@@ -202,18 +218,26 @@ function AppNew() {
     setSession(null)
     setAuthView('login')
     setShowAuth(false)
+    setShowPlans(false)
+    setBillingGate({ token: null, loading: false, active: false, error: '' })
   }
 
   if (!session?.token) return showAuth
     ? <><button className="auth-back-button" onClick={() => { setAuthError(''); setAuthInfo(''); setShowAuth(false) }}>← Voltar à página inicial</button><AuthScreen view={authView} setView={(view) => { setAuthError(''); setAuthInfo(''); setAuthView(view) }} error={authError} info={authInfo} onLogin={handleLogin} onSignup={handleSignup} /></>
-    : <NexoraLandingPage onRestricted={() => { setAuthError(''); setAuthView('login'); setShowAuth(true) }} />
+    : showPlans
+      ? <PublicPlansPage onBack={() => setShowPlans(false)} onSignup={() => { setAuthError(''); setAuthInfo(''); setAuthView('signup'); setShowAuth(true); setShowPlans(false) }} onLogin={() => { setAuthError(''); setAuthView('login'); setShowAuth(true); setShowPlans(false) }} />
+      : <NexoraLandingPage onRestricted={() => { setAuthError(''); setAuthView('login'); setShowAuth(true) }} onSelectPlans={() => setShowPlans(true)} />
+
+  const billingPending = billingUiEnabled && (billingGate.token !== session.token || billingGate.loading)
+  const can = (module, action) => canAccess(session, module, action)
+  if (billingPending) return <div className="subscription-required-shell"><img src="/logo_sem_fundo.png" alt="Nexora" /><p>Verificando a assinatura da empresa…</p></div>
+  if (billingUiEnabled && !billingGate.active) return <div className="subscription-required-shell"><header><img src="/logo_sem_fundo.png" alt="Nexora" /><div><strong>{session.companyName}</strong><button className="outline-button" onClick={logout}>Sair</button></div></header><main><SubscriptionPage session={session} can={can} required onActivated={() => setBillingGate({ token: session.token, loading: false, active: true, error: '' })} /></main></div>
 
   const normalizedQuery = query.trim().toLowerCase()
   const filteredProjects = normalizedQuery ? projects.filter((project) => `${project.name} ${project.location} ${project.code}`.toLowerCase().includes(normalizedQuery)) : projects
   const initials = session.userName.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase()
   const companyInitials = session.companyName.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase()
   const breadcrumbTitle = activeMenu === 'Nexora AI' ? 'Assistente' : activeMenu
-  const can = (module, action) => canAccess(session, module, action)
   function retryData() { setDataError(''); setDataLoading(true); setDataRefresh((current) => current + 1) }
 
   function notify(message) { setToast(message) }
@@ -258,7 +282,7 @@ function AppNew() {
       <div className="nexora-brand"><img src="/logo_sem_fundo.png" alt="Nexora" /><span>gestão inteligente para obras</span></div>
       <div className="company-switcher"><div className="company-avatar">{companyInitials}</div><div><strong>{session.companyName}</strong><small>Plano profissional</small></div><ChevronDown size={15} /></div>
       <nav className="nexora-nav">{menuGroups.map((group) => {
-        const items = group.items.filter(({ label }) => (label !== 'Funcionários' || can('employees', 'view')) && (label !== 'Equipes' || can('teams', 'view')) && (label !== 'Assinaturas' || ((import.meta.env.DEV || import.meta.env.VITE_ENABLE_SIMULATED_BILLING === 'true') && can('subscriptions', 'view'))))
+        const items = group.items.filter(({ label }) => (label !== 'Funcionários' || can('employees', 'view')) && (label !== 'Equipes' || can('teams', 'view')))
         if (!items.length) return null
         return <section className="nav-group" key={group.title}><span className="nav-label">{group.title}</span>{items.map(({ label, icon: Icon }) => <button key={label} aria-label={label === 'Nexora AI' ? 'Nexora AI' : undefined} className={activeMenu === label ? 'selected' : ''} onClick={() => { setActiveMenu(label); setSidebarOpen(false) }}><Icon size={18} />{label === 'Nexora AI' ? null : <span>{label}</span>}{label === 'Projetos e obras' && <b>{projects.length}</b>}</button>)}</section>
       })}<section className="nav-group nav-account-group"><span className="nav-label">SUA CONTA</span><button className={activeMenu === 'Configurações' ? 'selected' : ''} onClick={() => { setActiveMenu('Configurações'); setSidebarOpen(false) }}><Settings2 size={18} /><span>Configurações</span></button><button className={activeMenu === 'Ajuda' ? 'selected' : ''} onClick={() => { setActiveMenu('Ajuda'); setSidebarOpen(false) }}><CircleHelp size={18} /><span>Central de ajuda</span></button></section></nav>
@@ -266,7 +290,7 @@ function AppNew() {
     </aside>
     <main className="nexora-main">
       <header className="nexora-topbar"><button className="mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu"><Menu size={20} /></button><div className="crumb"><span>Espaço de trabalho</span><ArrowRight size={13} /><strong>{breadcrumbTitle}</strong></div><div className="top-actions"><label className="search-box"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar em sua operação" /></label><button className="notification" onClick={() => notify('Você não tem novas notificações.')} title="Notificações"><Bell size={18} /><i /></button><div className="top-user"><div className="user-avatar small">{initials}</div><span>{session.userName}</span><ChevronDown size={14} /></div></div></header>
-      <div className="workspace-content">{activeMenu === 'Visão geral' && <Overview projects={filteredProjects} liveStats={liveStats} onNavigate={setActiveMenu} />}{activeMenu === 'Tarefas' && <InternalRequestsPage session={session} notify={notify} can={can} />}{activeMenu === 'Projetos e obras' && <ProjectsPage projects={filteredProjects} onNew={() => { setEditingProject(null); setShowProjectModal(true) }} onEdit={setEditingProject} notify={notify} session={session} />}{activeMenu === 'Diário de Obra' && <WorkDiaryPage session={session} can={can} canEquipment={can('equipment', 'view')} notify={notify} />}{activeMenu === 'Funcionários' && <EmployeesPage session={session} can={can} notify={notify} />}{activeMenu === 'Equipes' && <TeamsPage session={session} can={can} notify={notify} />}{activeMenu === 'Estoque' && <StockPage supplies={supplies} projects={projects} onNew={() => setShowSupplyModal(true)} notify={notify} />}{activeMenu === 'Fornecedores' && <SuppliersPage suppliers={suppliers} pagination={supplierPagination} onLoad={loadSuppliers} onSave={saveSupplier} onArchive={archiveSupplier} notify={notify} can={can} />}{activeMenu === 'Compras' && <PurchasesPage requests={purchaseRequests} quotations={quotations} onCreate={createPurchaseRequest} onSelectQuotation={selectQuotation} notify={notify} />}{activeMenu === 'Financeiro' && <FinancePage payables={payables} receivables={receivables} onSettle={settleAccount} onCreate={createAccount} notify={notify} can={can} />}{activeMenu === 'Assinaturas' && <SubscriptionPage session={session} can={can} />}{activeMenu === 'Equipamentos' && <EquipmentPage equipments={equipments} maintenances={maintenances} onCreate={(data) => createResource('equipment', data, setEquipments)} onEdit={(item, data) => updateResource('equipment', item, data, setEquipments)} onDelete={(item) => deleteResource('equipment', item, setEquipments)} onMaintenanceCreate={(data) => createResource('maintenance', data, setMaintenances)} onMaintenanceEdit={(item, data) => updateResource('maintenance', item, data, setMaintenances)} onMaintenanceDelete={(item) => deleteResource('maintenance', item, setMaintenances)} />}{activeMenu === 'Agenda de campo' && <AgendaPage activities={activities} onCreate={(data) => createResource('field-activities', data, setActivities)} onEdit={(item, data) => updateResource('field-activities', item, data, setActivities)} onDelete={(item) => deleteResource('field-activities', item, setActivities)} notify={notify} />}{activeMenu === 'Documentos' && <DocumentsPage documents={documents} onUpload={uploadDocument} onDownload={downloadDocument} onArchive={archiveDocument} onDelete={deleteDocument} onRename={renameDocument} notify={notify} can={can} />}{activeMenu === 'Clientes' && <ClientsPage clients={clients} pagination={clientPagination} onLoad={loadClients} onSave={saveClient} onArchive={archiveClient} can={can} />}{activeMenu === 'Configurações' && <SettingsPage session={session} setSession={setSession} notify={notify} />}{activeMenu === 'Ajuda' && <HelpPage notify={notify} />}{activeMenu === 'Nexora AI' && <NexoraAIChat session={session} aiDraft={aiDraft} setAiDraft={setAiDraft} aiMessages={aiMessages} setAiMessages={setAiMessages} aiLoading={aiLoading} setAiLoading={setAiLoading} aiError={aiError} setAiError={setAiError} />}{!['Visão geral', 'Tarefas', 'Projetos e obras', 'Diário de Obra', 'Funcionários', 'Equipes', 'Estoque', 'Fornecedores', 'Compras', 'Financeiro', 'Assinaturas', 'Equipamentos', 'Agenda de campo', 'Documentos', 'Clientes', 'Configurações', 'Ajuda', 'Nexora AI'].includes(activeMenu) && <BusinessModulePage module={activeMenu} />}</div>
+      <div className="workspace-content">{activeMenu === 'Visão geral' && <Overview projects={filteredProjects} liveStats={liveStats} onNavigate={setActiveMenu} />}{activeMenu === 'Tarefas' && <InternalRequestsPage session={session} notify={notify} can={can} />}{activeMenu === 'Projetos e obras' && <ProjectsPage projects={filteredProjects} onNew={() => { setEditingProject(null); setShowProjectModal(true) }} onEdit={setEditingProject} notify={notify} session={session} />}{activeMenu === 'Diário de Obra' && <WorkDiaryPage session={session} can={can} canEquipment={can('equipment', 'view')} notify={notify} />}{activeMenu === 'Funcionários' && <EmployeesPage session={session} can={can} notify={notify} />}{activeMenu === 'Equipes' && <TeamsPage session={session} can={can} notify={notify} />}{activeMenu === 'Estoque' && <StockPage supplies={supplies} projects={projects} onNew={() => setShowSupplyModal(true)} notify={notify} />}{activeMenu === 'Fornecedores' && <SuppliersPage suppliers={suppliers} pagination={supplierPagination} onLoad={loadSuppliers} onSave={saveSupplier} onArchive={archiveSupplier} notify={notify} can={can} />}{activeMenu === 'Compras' && <PurchasesPage requests={purchaseRequests} quotations={quotations} onCreate={createPurchaseRequest} onSelectQuotation={selectQuotation} notify={notify} />}{activeMenu === 'Financeiro' && <FinancePage payables={payables} receivables={receivables} onSettle={settleAccount} onCreate={createAccount} notify={notify} can={can} />}{activeMenu === 'Equipamentos' && <EquipmentPage equipments={equipments} maintenances={maintenances} onCreate={(data) => createResource('equipment', data, setEquipments)} onEdit={(item, data) => updateResource('equipment', item, data, setEquipments)} onDelete={(item) => deleteResource('equipment', item, setEquipments)} onMaintenanceCreate={(data) => createResource('maintenance', data, setMaintenances)} onMaintenanceEdit={(item, data) => updateResource('maintenance', item, data, setMaintenances)} onMaintenanceDelete={(item) => deleteResource('maintenance', item, setMaintenances)} />}{activeMenu === 'Agenda de campo' && <AgendaPage activities={activities} onCreate={(data) => createResource('field-activities', data, setActivities)} onEdit={(item, data) => updateResource('field-activities', item, data, setActivities)} onDelete={(item) => deleteResource('field-activities', item, setActivities)} notify={notify} />}{activeMenu === 'Documentos' && <DocumentsPage documents={documents} onUpload={uploadDocument} onDownload={downloadDocument} onArchive={archiveDocument} onDelete={deleteDocument} onRename={renameDocument} notify={notify} can={can} />}{activeMenu === 'Clientes' && <ClientsPage clients={clients} pagination={clientPagination} onLoad={loadClients} onSave={saveClient} onArchive={archiveClient} can={can} />}{activeMenu === 'Configurações' && <SettingsPage session={session} setSession={setSession} notify={notify} />}{activeMenu === 'Ajuda' && <HelpPage notify={notify} />}{activeMenu === 'Nexora AI' && <NexoraAIChat session={session} aiDraft={aiDraft} setAiDraft={setAiDraft} aiMessages={aiMessages} setAiMessages={setAiMessages} aiLoading={aiLoading} setAiLoading={setAiLoading} aiError={aiError} setAiError={setAiError} />}{!['Visão geral', 'Tarefas', 'Projetos e obras', 'Diário de Obra', 'Funcionários', 'Equipes', 'Estoque', 'Fornecedores', 'Compras', 'Financeiro', 'Equipamentos', 'Agenda de campo', 'Documentos', 'Clientes', 'Configurações', 'Ajuda', 'Nexora AI'].includes(activeMenu) && <BusinessModulePage module={activeMenu} />}</div>
 <GlobalPagination activeMenu={activeMenu} />
     </main>
     {(showProjectModal || editingProject) && <ProjectModal project={editingProject} onClose={() => { setShowProjectModal(false); setEditingProject(null) }} onCreate={editingProject ? updateProject : createProject} />}
@@ -275,7 +299,7 @@ function AppNew() {
   </div>
 }
 
-function NexoraLandingPage({ onRestricted }) {
+function NexoraLandingPage({ onRestricted, onSelectPlans }) {
   useEffect(() => {
     const items = document.querySelectorAll('.nexora-reveal')
     if (!('IntersectionObserver' in window)) { items.forEach((item) => item.classList.add('is-visible')); return undefined }
@@ -299,7 +323,7 @@ function NexoraLandingPage({ onRestricted }) {
   return <div className="nexora-landing">
     <header className="landing-header">
       <a className="landing-brand" href="#inicio" aria-label="Nexora, início"><img src="/logo_sem_fundo.png" alt="Nexora" /></a>
-      <nav className="landing-nav" aria-label="Navegação principal"><a href="#sobre">A Nexora</a><a href="#beneficios">Benefícios</a><a href="#historia">Nossa história</a></nav>
+      <nav className="landing-nav" aria-label="Navegação principal"><a href="#sobre">A Nexora</a><a href="#beneficios">Benefícios</a><a href="#historia">Nossa história</a><button className="landing-plan-link" onClick={onSelectPlans}>Planos</button></nav>
       <button className="landing-restricted" onClick={onRestricted}>Área restrita <ArrowRight size={16} /></button>
     </header>
 
@@ -347,9 +371,21 @@ function NexoraLandingPage({ onRestricted }) {
         <div className="landing-story-inner"><div className="landing-story-mark nexora-reveal"><img src="/logo_sem_fundo.png" alt="Nexora" /><span>UMA HISTÓRIA QUE SEGUE EM MOVIMENTO</span></div><div className="landing-story-copy nexora-reveal"><span className="landing-section-kicker">NOSSA HISTÓRIA</span><h2>Uma necessidade concreta.<br /><em>Uma visão cada vez maior.</em></h2><p>A Nexora começou olhando de perto para um desafio específico: acompanhar projetos de instalação de silos e secadores de grãos, com suas equipes, prazos, materiais e etapas em campo.</p><p>Desse ponto de partida nasceu uma ideia mais ampla: reunir em uma só plataforma as informações que ajudam uma empresa a funcionar melhor. A Nexora continua evoluindo com esse propósito — aproximar a gestão do dia a dia e tornar cada etapa mais visível.</p></div></div>
       </section>
 
-      <section className="landing-final-cta"><div className="landing-cta-orb" /><span className="landing-section-kicker">A PRÓXIMA ETAPA COMEÇA COM CLAREZA</span><h2>Vamos fazer sua operação avançar?</h2><p>Entre na área restrita para acessar sua conta Nexora.</p><button className="landing-primary" onClick={onRestricted}>Acessar a Nexora <ArrowRight size={17} /></button></section>
+      <section className="landing-final-cta"><div className="landing-cta-orb" /><span className="landing-section-kicker">A PRÓXIMA ETAPA COMEÇA COM CLAREZA</span><h2>Vamos fazer sua operação avançar?</h2><p>Conheça o plano da Nexora e escolha como começar.</p><button className="landing-primary" onClick={onSelectPlans}>Selecionar planos <ArrowRight size={17} /></button><button className="landing-text-link" onClick={onRestricted}>Já tenho uma conta <ArrowRight size={15} /></button></section>
     </main>
     <footer className="landing-footer"><a className="landing-brand" href="#inicio"><img src="/logo_sem_fundo.png" alt="Nexora" /></a><span>Gestão conectada ao campo.</span><a href="#inicio">Voltar ao início ↑</a><small>© {new Date().getFullYear()} Nexora</small></footer>
+  </div>
+}
+
+function PublicPlansPage({ onBack, onSignup, onLogin }) {
+  const features = ['Projetos e obras conectados à rotina de campo', 'Equipes, funcionários e documentos em um só lugar', 'Estoque, compras, equipamentos e financeiro integrados', 'Acesso para a equipe da empresa']
+  return <div className="public-plans-page">
+    <header className="public-plans-header"><button className="public-plans-back" onClick={onBack}>← Voltar à apresentação</button><img src="/logo_sem_fundo.png" alt="Nexora" /><button className="public-plans-login" onClick={onLogin}>Já tenho conta</button></header>
+    <main className="public-plans-main"><div className="public-plans-intro"><span className="landing-section-kicker">PLANOS NEXORA</span><h1>Uma operação mais conectada começa aqui.</h1><p>Escolha o plano para sua empresa e conheça o fluxo de contratação.</p></div>
+      <section className="public-plan-card"><div className="public-plan-copy"><span className="public-plan-tag">PLANO PARA SUA EMPRESA</span><h2>Nexora Pro</h2><p>As ferramentas de gestão da Nexora para aproximar escritório, obras e equipes.</p><ul>{features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul></div><div className="public-plan-purchase"><span className="public-plan-caption">Investimento mensal</span><div className="public-plan-price">R$ 500<span>,00</span></div><span className="public-plan-period">por empresa / mês</span><button className="landing-primary" onClick={onSignup}>Selecionar plano <ArrowRight size={17} /></button><small>Após criar sua conta, você verá a etapa de ativação da empresa.</small><div className="public-payment-methods"><span>FORMAS DISPONÍVEIS NA SIMULAÇÃO</span><div><b>Cartão</b><b>PIX</b><b>Boleto</b></div></div></div></section>
+      <div className="public-plan-note"><ShieldCheck size={17} /><p>Ambiente demonstrativo: a contratação e a aprovação do pagamento são simuladas. Não informe dados reais de cartão; nenhuma cobrança é realizada.</p></div>
+      <p className="public-plan-existing">Já tem cadastro? <button onClick={onLogin}>Acesse sua conta</button></p>
+    </main><footer className="public-plans-footer">© {new Date().getFullYear()} Nexora · Gestão conectada ao campo</footer>
   </div>
 }
 

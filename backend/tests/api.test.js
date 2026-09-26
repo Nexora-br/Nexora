@@ -101,6 +101,7 @@ test('verificação opcional identifica empresas sem assinatura sem bloquear o a
   const login = await request(app).post('/api/auth/login').send({ email, password: 'senha123' })
   assert.equal(login.status, 200)
   const original = process.env.NEXORA_ENFORCE_SUBSCRIPTIONS
+  const originalSimulator = process.env.NEXORA_ENABLE_SIMULATED_BILLING
   process.env.NEXORA_ENFORCE_SUBSCRIPTIONS = 'true'
   try {
     assert.equal((await request(app).get('/api/projects').set('Authorization', `Bearer ${login.body.token}`)).status, 402)
@@ -109,6 +110,8 @@ test('verificação opcional identifica empresas sem assinatura sem bloquear o a
   } finally {
     if (original === undefined) delete process.env.NEXORA_ENFORCE_SUBSCRIPTIONS
     else process.env.NEXORA_ENFORCE_SUBSCRIPTIONS = original
+    if (originalSimulator === undefined) delete process.env.NEXORA_ENABLE_SIMULATED_BILLING
+    else process.env.NEXORA_ENABLE_SIMULATED_BILLING = originalSimulator
   }
 })
 
