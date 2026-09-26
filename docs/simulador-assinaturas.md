@@ -1,11 +1,11 @@
 # Simulador de assinaturas Nexora
 
-Este módulo é exclusivamente para desenvolvimento e testes. Não se conecta a um gateway, não envia cobranças e não solicita nem armazena número, validade ou CVV de cartão. Escolher “Cartão” apenas registra essa forma no histórico fictício.
+Este módulo é exclusivamente para desenvolvimento e testes. Não se conecta a um gateway nem envia cobranças. A tela pública de checkout pode receber dados fictícios de cartão apenas em memória no navegador; não os envia à API, não os persiste e os descarta ao continuar. Nunca digite dados reais. O servidor registra somente a forma de pagamento escolhida no histórico fictício.
 
 ## Ativação
 
 - Local: execute o backend normalmente e use o Vite em modo de desenvolvimento. As rotas da API são habilitadas em `NODE_ENV=test` ou com `NEXORA_ENABLE_SIMULATED_BILLING=true`.
-- A apresentação pública possui uma tela própria de planos: “Selecionar planos” mostra Nexora Pro (R$ 500,00/mês), os recursos e os meios disponíveis na simulação. A seleção encaminha ao cadastro da empresa. Com a interface de assinatura habilitada, após login ou cadastro, a ativação simulada aparece antes do workspace.
+- A apresentação pública possui telas próprias de planos e checkout: “Selecionar planos” mostra Nexora Pro (R$ 500,00/mês); “Selecionar plano” abre a escolha entre cartão, PIX e boleto demonstrativos antes do cadastro. O cadastro leva à etapa de ativação simulada antes do workspace.
 - Em build publicado, configure `VITE_ENABLE_SIMULATED_BILLING=true` durante o build para habilitar a etapa de ativação e o bloqueio do workspace. Habilite também `NEXORA_ENABLE_SIMULATED_BILLING=true` no backend.
 - A API barra as demais rotas enquanto a simulação estiver ativada. Só o administrador da empresa pode confirmar a simulação; todos os usuários da empresa passam pela verificação de assinatura.
 - `NEXORA_ENFORCE_SUBSCRIPTIONS=true` também ativa o bloqueio da API, mesmo sem habilitar as rotas do simulador. Administradores são liberados sem assinatura apenas em `NODE_ENV=test`.

@@ -7,9 +7,9 @@ const methodLabels = { CARTAO: 'Cartão (simulação)', PIX: 'PIX (simulação)'
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString('pt-BR') : '—'
 const moneyLabel = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-export function SubscriptionPage({ session, can, required = false, onActivated }) {
+export function SubscriptionPage({ session, can, required = false, initialMethod = 'PIX', onActivated }) {
   const [data, setData] = useState(null)
-  const [method, setMethod] = useState('PIX')
+  const [method, setMethod] = useState(initialMethod)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')

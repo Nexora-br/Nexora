@@ -549,6 +549,30 @@ html, body, #root { width:100%; max-width:100%; overflow-x:clip; }
 .public-plan-existing { margin:21px 0 0; color:#8499a2; font-size:11px; text-align:center; }
 .public-plan-existing button { padding:0 3px; font-size:11px; }
 .public-plans-footer { padding:19px; border-top:1px solid #e5edef; color:#8aa0aa; font-size:10px; text-align:center; }
+.public-checkout-main { width:min(100% - 36px,700px); margin:0 auto; padding:clamp(43px,7vw,74px) 0 54px; }
+.public-checkout-card { padding:clamp(20px,5vw,38px); border:1px solid #dce9ed; border-radius:20px; background:#fff; box-shadow:0 22px 65px rgba(35,83,104,.09); animation:plan-card-enter .45s ease both; }
+.public-checkout-methods { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:24px; }
+.public-method-option { display:flex; align-items:center; gap:9px; min-height:48px; padding:10px 13px; border:1px solid #dce8ec; border-radius:10px; color:#597989; background:#fff; font-size:12px; font-weight:700; cursor:pointer; }
+.public-method-option.selected { border-color:#5ba5b8; color:#1f5a73; background:#f1fafb; box-shadow:0 0 0 2px rgba(91,165,184,.1); }
+.public-method-option input { accent-color:#3285a0; }
+.public-card-fields { display:grid; gap:14px; padding:19px; border:1px solid #e3ecef; border-radius:13px; background:#fbfdfe; }
+.public-card-fields-heading { display:flex; align-items:flex-start; gap:10px; margin-bottom:2px; color:#3285a0; }
+.public-card-fields-heading>div { display:grid; gap:4px; }
+.public-card-fields-heading strong { color:#315c73; font-size:13px; }
+.public-card-fields-heading span { color:#8299a4; font-size:10px; line-height:1.5; }
+.public-card-fields label { display:grid; gap:6px; color:#526f7e; font-size:11px; font-weight:650; }
+.public-card-fields input { width:100%; min-width:0; padding:11px 12px; border:1px solid #dce7eb; border-radius:8px; color:#31576b; background:#fff; font:inherit; outline:none; }
+.public-card-fields input:focus { border-color:#5599ae; box-shadow:0 0 0 3px rgba(85,153,174,.12); }
+.public-card-fields-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.public-checkout-info { min-height:110px; padding:22px; border:1px solid #dceaf0; border-radius:12px; background:#f4fafc; }
+.public-checkout-info strong { color:#315c73; font-size:13px; }
+.public-checkout-info p { margin:8px 0 0; color:#78919d; font-size:11px; line-height:1.6; }
+.public-checkout-total { display:flex; align-items:center; justify-content:space-between; margin:22px 0 15px; padding-top:16px; border-top:1px solid #e6eef0; color:#78919d; font-size:12px; }
+.public-checkout-total strong { color:#244f66; font:750 18px Manrope,sans-serif; }
+.public-checkout-submit { display:flex; width:100%; min-height:46px; align-items:center; justify-content:center; border:0; cursor:pointer; }
+.public-checkout-error { margin:0 0 12px; color:#a64d4d; font-size:11px; }
+.public-checkout-disclaimer { display:flex; align-items:flex-start; gap:8px; margin:15px 0 0; color:#8198a2; font-size:10px; line-height:1.6; }
+.public-checkout-disclaimer svg { flex:0 0 auto; margin-top:1px; color:#4d93a9; }
 @keyframes plan-card-enter { from { opacity:0; transform:translateY(18px) scale(.99); } to { opacity:1; transform:translateY(0) scale(1); } }
 @media(max-width:760px) {
   .auth-form-wrap { width:min(100%,560px); }
@@ -569,4 +593,8 @@ html, body, #root { width:100%; max-width:100%; overflow-x:clip; }
   .public-plan-card { grid-template-columns:minmax(0,1fr); }
   .public-plan-purchase { border-top:1px solid #eaf0f2; border-left:0; }
   .public-plan-price { font-size:36px; }
+  .public-checkout-main { width:min(100% - 28px,700px); padding-top:35px; }
+  .public-checkout-methods { gap:6px; }
+  .public-method-option { justify-content:center; gap:5px; padding-inline:5px; font-size:10px; }
+  .public-card-fields { padding:15px; }
 }

@@ -86,7 +86,9 @@ describe('autenticação', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('leva da apresentação à página de planos e depois ao cadastro', async () => {
+  it('leva da apresentação ao checkout demonstrativo antes de abrir o cadastro', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     render(<AppNew />)
     await user.click(screen.getByRole('button', { name: 'Planos' }))
@@ -94,7 +96,14 @@ describe('autenticação', () => {
     expect(screen.getByText(/R\$ 500/)).toBeInTheDocument()
     expect(screen.getByText('PIX')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Selecionar plano/ }))
+    expect(screen.getByRole('heading', { name: 'Escolha como deseja pagar.' })).toBeInTheDocument()
+    await user.type(screen.getByLabelText('Nome no cartão'), 'Cartão de Teste')
+    await user.type(screen.getByLabelText('Número do cartão'), '4242424242424242')
+    await user.type(screen.getByLabelText('Validade'), '1230')
+    await user.type(screen.getByLabelText('Código de segurança'), '123')
+    await user.click(screen.getByRole('button', { name: 'Continuar para cadastro' }))
     expect(screen.getByRole('heading', { name: 'Cadastre sua empresa' })).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('faz login real via API e persiste a sessão', async () => {
