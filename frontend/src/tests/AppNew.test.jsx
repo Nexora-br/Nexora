@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppNew, AuthScreen, ClientsPage, HistoryPanel, Pagination, ProjectsPage, StockPage, SuppliersPage } from '../AppNew'
+import { SubscriptionPage } from '../SubscriptionPage'
 import { canAccess } from '../permissions'
 
 const jsonResponse = (body, ok = true, status = ok ? 200 : 500) => ({ ok, status, headers: { get: () => 'application/json' }, json: async () => body })
@@ -138,6 +139,18 @@ describe('autenticação', () => {
     await user.click(screen.getByTitle('Sair'))
     expect(localStorage.getItem('nexora-session')).toBeNull()
     expect(screen.getByRole('button', { name: /Área restrita/ })).toBeInTheDocument()
+  })
+})
+
+describe('assinatura', () => {
+  it('trata HTML do backend como serviço indisponível e mantém o preço do plano', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, headers: { get: () => 'text/html' }, json: async () => { throw new SyntaxError('Unexpected token <') } }))
+    render(<SubscriptionPage session={{ token: 'token', role: 'ADMINISTRADOR' }} can={() => true} required />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('servidor de assinaturas da Nexora ainda não está atualizado ou está indisponível')
+    expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument()
+    expect(screen.getByText(/R\$\s*500,00/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Assinar/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Tentar novamente' })).toBeInTheDocument()
   })
 })
 
