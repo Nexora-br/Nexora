@@ -4,6 +4,11 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "npm --prefix frontend install",
   "framework": "vite",
+  "build": {
+    "env": {
+      "VITE_ENABLE_SIMULATED_BILLING": "true"
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",
