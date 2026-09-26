@@ -335,21 +335,43 @@ function buildFallbackAiAnswer(intent, context) {
   return projectCount > 0 ? `A empresa possui ${projectCount} projeto(s) em andamento.` : 'Não há dados disponíveis para o resumo da empresa.'
 }
 
+function normalizeCnpj(value) { return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '') }
+function validCnpj(value) {
+  const cnpj = normalizeCnpj(value)
+  if (!/^[A-Z0-9]{12}\d{2}$/.test(cnpj) || /^([A-Z0-9])\1{13}$/.test(cnpj)) return false
+  const digit = (base, weights) => { const sum = [...base].reduce((total, character, index) => total + (character.charCodeAt(0) - 48) * weights[index], 0); const remainder = sum % 11; return remainder < 2 ? 0 : 11 - remainder }
+  const first = digit(cnpj.slice(0, 12), [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+  const second = digit(cnpj.slice(0, 12) + first, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+  return cnpj.endsWith(`${first}${second}`)
+}
+
 app.post('/api/auth/register', registrationRateLimit, async (request, response) => {
   try {
-    const { companyName, legalName, cnpj, userName, email, password } = request.body || {}
+    const { companyName, legalName, cnpj, userName, email, password, phone, segment, zip_code, address, address_number, complement, district, city, state, website } = request.body || {}
     const normalizedEmail = String(email || '').trim().toLowerCase()
     const normalizedCompany = String(companyName || '').trim()
+    const normalizedLegalName = String(legalName || '').trim()
+    const normalizedCnpj = normalizeCnpj(cnpj)
+    const normalizedZipCode = String(zip_code || '').replace(/\D/g, '')
+    const normalizedState = String(state || '').trim().toUpperCase()
     const normalizedName = String(userName || '').trim()
-    if (!normalizedCompany || !normalizedName || !normalizedEmail || !password) return response.status(400).json({ error: 'Empresa, administrador, e-mail e senha são obrigatórios.' })
-    if (normalizedCompany.length > 160 || normalizedName.length > 160 || normalizedEmail.length > 254) return response.status(400).json({ error: 'Um ou mais campos excedem o tamanho permitido.' })
+    const companyEmail = String(request.body?.company_email || email || '').trim().toLowerCase()
+    const requiredCompanyFields = [normalizedCompany, normalizedLegalName, normalizedCnpj, normalizedName, normalizedEmail, companyEmail, phone, segment, normalizedZipCode, address, address_number, district, city, normalizedState]
+    if (requiredCompanyFields.some((value) => !String(value || '').trim()) || !password) return response.status(400).json({ error: 'Preencha os dados da empresa e da pessoa administradora.' })
+    if (!validCnpj(normalizedCnpj)) return response.status(400).json({ error: 'Informe um CNPJ válido.' })
+    if (normalizedZipCode.length !== 8) return response.status(400).json({ error: 'Informe um CEP válido com 8 números.' })
+    if (!/^[A-Z]{2}$/.test(normalizedState)) return response.status(400).json({ error: 'Informe uma UF válida com duas letras.' })
+    if (normalizedCompany.length > 160 || normalizedLegalName.length > 180 || normalizedName.length > 160 || normalizedEmail.length > 254 || companyEmail.length > 254 || String(phone).length > 32 || String(segment).length > 100 || String(address).length > 180 || String(address_number).length > 30 || String(complement || '').length > 120 || String(district).length > 120 || String(city).length > 120 || String(website || '').length > 200) return response.status(400).json({ error: 'Um ou mais campos excedem o tamanho permitido.' })
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return response.status(400).json({ error: 'Informe um endereço de e-mail válido.' })
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(companyEmail)) return response.status(400).json({ error: 'Informe um e-mail comercial válido.' })
     if (String(password).length < 12 || Buffer.byteLength(String(password), 'utf8') > 72) return response.status(400).json({ error: 'A senha deve ter pelo menos 12 caracteres e no máximo 72 bytes.' })
+    const existingCompanies = await db.all('SELECT id, cnpj FROM companies WHERE cnpj IS NOT NULL')
+    if (existingCompanies.some((company) => normalizeCnpj(company.cnpj) === normalizedCnpj)) return response.status(409).json({ error: 'Já existe uma empresa com este CNPJ. Use “Solicitar acesso à empresa”.' })
     const companyId = id()
     const userId = id()
     const passwordHash = await bcrypt.hash(String(password), 12)
     await db.transaction(async () => {
-      await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email) VALUES (?, ?, ?, ?, ?)', [companyId, legalName || normalizedCompany, normalizedCompany, cnpj || null, normalizedEmail])
+      await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [companyId, normalizedLegalName, normalizedCompany, normalizedCnpj, companyEmail, String(phone).trim(), String(segment).trim(), normalizedZipCode, String(address).trim(), String(address_number).trim(), String(complement || '').trim() || null, String(district).trim(), String(city).trim(), normalizedState, String(website || '').trim() || null])
       const role = await db.get('SELECT id FROM roles WHERE name = ?', ['ADMINISTRADOR'])
       await db.run('INSERT INTO users (id, company_id, name, email, password_hash, job_title) VALUES (?, ?, ?, ?, ?, ?)', [userId, companyId, normalizedName, normalizedEmail, passwordHash, 'Administrador'])
       await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
@@ -358,9 +380,32 @@ app.post('/api/auth/register', registrationRateLimit, async (request, response) 
     const user = await db.get('SELECT u.*, r.name AS role FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles r ON r.id = ur.role_id WHERE u.id = ?', [userId])
     response.status(201).json({ token: tokenFor(user), user: cleanUser(user, ['*.*']), company: { id: companyId, name: normalizedCompany } })
   } catch (error) {
+    if (error.code === '23505' || error.message.includes('idx_companies_cnpj_unique') || error.message.includes('companies.cnpj')) return response.status(409).json({ error: 'Já existe uma empresa com este CNPJ. Use “Solicitar acesso à empresa”.' })
     if (error.message.includes('UNIQUE')) return response.status(409).json({ error: 'Este e-mail já está cadastrado nesta empresa.' })
     errorResponse(response, error)
   }
+})
+app.post('/api/auth/join-request', registrationRateLimit, async (request, response) => {
+  try {
+    const { name, email, password, phone, job_title: jobTitle, department } = request.body || {}
+    const cnpj = normalizeCnpj(request.body?.cnpj)
+    const normalizedEmail = String(email || '').trim().toLowerCase()
+    const normalizedName = String(name || '').trim()
+    if (!validCnpj(cnpj) || !normalizedName || !normalizedEmail || !password) return response.status(400).json({ error: 'Informe um CNPJ válido, seu nome, e-mail e senha.' })
+    if (normalizedName.length > 160 || normalizedEmail.length > 254 || String(phone || '').length > 32 || String(jobTitle || '').length > 120 || String(department || '').length > 120) return response.status(400).json({ error: 'Um ou mais campos excedem o tamanho permitido.' })
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return response.status(400).json({ error: 'Informe um endereço de e-mail válido.' })
+    if (String(password).length < 12 || Buffer.byteLength(String(password), 'utf8') > 72) return response.status(400).json({ error: 'A senha deve ter pelo menos 12 caracteres e no máximo 72 bytes.' })
+    const companies = await db.all('SELECT id, cnpj FROM companies WHERE cnpj IS NOT NULL')
+    const company = companies.find((row) => normalizeCnpj(row.cnpj) === cnpj)
+    if (!company) return response.status(404).json({ error: 'Não encontramos uma empresa com este CNPJ. Se ela ainda não usa o Nexora, escolha “Criar uma empresa”.' })
+    const existingUser = await db.get('SELECT id FROM users WHERE company_id = ? AND lower(trim(email)) = ?', [company.id, normalizedEmail])
+    if (existingUser) return response.status(409).json({ error: 'Este e-mail já tem acesso a essa empresa. Tente entrar na sua conta.' })
+    const duplicate = await db.get("SELECT id FROM company_access_requests WHERE company_id = ? AND lower(trim(email)) = ? AND status = 'PENDENTE'", [company.id, normalizedEmail])
+    if (duplicate) return response.status(409).json({ error: 'Já existe um pedido pendente com este e-mail para a empresa.' })
+    const requestId = id()
+    await db.run('INSERT INTO company_access_requests (id, company_id, name, email, password_hash, phone, job_title, department) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [requestId, company.id, normalizedName, normalizedEmail, await bcrypt.hash(String(password), 12), String(phone || '').trim() || null, String(jobTitle || '').trim() || null, String(department || '').trim() || null])
+    response.status(202).json({ id: requestId, status: 'PENDENTE', message: 'Pedido enviado. Um administrador da empresa precisa aprovar seu acesso.' })
+  } catch (error) { if (error.code === '23505' || error.message.includes('idx_company_access_requests_pending_email')) return response.status(409).json({ error: 'Já existe um pedido pendente com este e-mail para a empresa.' }); errorResponse(response, error) }
 })
 app.post('/api/auth/login', loginRateLimit, async (request, response) => {
   try {
@@ -536,6 +581,76 @@ app.post('/api/ai/chat', auth, async (request, response) => {
     console.error('Nexora AI error:', error)
     response.json({ answer: 'Não foi possível consultar o Nexora AI agora.', companyId: request.user?.company_id, scope: { module: 'dashboard', query: 'dashboard_summary', period: 'geral' }, summary: {}, contextType: 'error' })
   }
+})
+
+app.get('/api/company', auth, requireAdministrator, async (request, response) => {
+  try {
+    const company = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website FROM companies WHERE id = ?', [request.user.company_id])
+    if (!company) return response.status(404).json({ error: 'Empresa não encontrada.' })
+    response.json(company)
+  } catch (error) { errorResponse(response, error) }
+})
+
+app.put('/api/company', auth, requireAdministrator, async (request, response) => {
+  try {
+    const body = request.body || {}
+    const legalName = String(body.legal_name || '').trim()
+    const tradeName = String(body.trade_name || '').trim()
+    const cnpj = normalizeCnpj(body.cnpj)
+    const email = String(body.email || '').trim().toLowerCase()
+    const zipCode = String(body.zip_code || '').replace(/\D/g, '')
+    const state = String(body.state || '').trim().toUpperCase()
+    if (!legalName || !tradeName || !validCnpj(cnpj) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return response.status(400).json({ error: 'Informe razão social, nome fantasia, CNPJ válido e e-mail comercial.' })
+    if (body.zip_code && zipCode.length !== 8) return response.status(400).json({ error: 'Se informar o CEP, use os 8 números válidos.' })
+    if (body.state && !/^[A-Z]{2}$/.test(state)) return response.status(400).json({ error: 'Informe uma UF válida com duas letras.' })
+    if (legalName.length > 180 || tradeName.length > 160 || email.length > 254 || String(body.phone || '').length > 32 || String(body.segment || '').length > 100) return response.status(400).json({ error: 'Um ou mais campos excedem o tamanho permitido.' })
+    const companies = await db.all('SELECT id, cnpj FROM companies WHERE id <> ? AND cnpj IS NOT NULL', [request.user.company_id])
+    if (companies.some((company) => normalizeCnpj(company.cnpj) === cnpj)) return response.status(409).json({ error: 'Este CNPJ já está cadastrado em outra empresa Nexora.' })
+    const previous = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website FROM companies WHERE id = ?', [request.user.company_id])
+    if (!previous) return response.status(404).json({ error: 'Empresa não encontrada.' })
+    await db.run('UPDATE companies SET legal_name = ?, trade_name = ?, cnpj = ?, email = ?, phone = ?, segment = ?, zip_code = ?, address = ?, address_number = ?, complement = ?, district = ?, city = ?, state = ?, website = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [legalName, tradeName, cnpj, email, String(body.phone || '').trim() || null, String(body.segment || '').trim() || null, zipCode || null, String(body.address || '').trim() || null, String(body.address_number || '').trim() || null, String(body.complement || '').trim() || null, String(body.district || '').trim() || null, String(body.city || '').trim() || null, state || null, String(body.website || '').trim() || null, request.user.company_id])
+    const updated = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website FROM companies WHERE id = ?', [request.user.company_id])
+    await audit(request.user, 'ATUALIZAR_CADASTRO_EMPRESA', 'EMPRESA', request.user.company_id, previous, updated)
+    response.json(updated)
+  } catch (error) { if (error.code === '23505' || error.message.includes('idx_companies_cnpj_unique') || error.message.includes('companies.cnpj')) return response.status(409).json({ error: 'Este CNPJ já está cadastrado em outra empresa Nexora.' }); errorResponse(response, error) }
+})
+
+app.get('/api/company-access-requests', auth, requireAdministrator, async (request, response) => {
+  try {
+    const status = ['PENDENTE', 'APROVADA', 'RECUSADA'].includes(request.query.status) ? request.query.status : null
+    const rows = await db.all(`SELECT r.id, r.company_id, r.name, r.email, r.phone, r.job_title, r.department, r.status, r.reviewed_by, r.reviewed_at, r.review_note, r.linked_user_id, r.created_at, u.name AS reviewer_name FROM company_access_requests r LEFT JOIN users u ON u.id = r.reviewed_by AND u.company_id = r.company_id WHERE r.company_id = ? ${status ? 'AND r.status = ?' : ''} ORDER BY CASE r.status WHEN 'PENDENTE' THEN 0 ELSE 1 END, r.created_at DESC`, status ? [request.user.company_id, status] : [request.user.company_id])
+    response.json(rows)
+  } catch (error) { errorResponse(response, error) }
+})
+
+app.post('/api/company-access-requests/:id/decision', auth, requireAdministrator, async (request, response) => {
+  try {
+    const decision = String(request.body?.decision || '')
+    const accessRequest = await db.get("SELECT * FROM company_access_requests WHERE id = ? AND company_id = ? AND status = 'PENDENTE'", [request.params.id, request.user.company_id])
+    if (!accessRequest) return response.status(404).json({ error: 'Pedido pendente não encontrado.' })
+    if (decision === 'RECUSAR') {
+      const note = String(request.body?.note || '').trim().slice(0, 500) || null
+      await db.run("UPDATE company_access_requests SET status = 'RECUSADA', password_hash = '', reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, review_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ? AND status = 'PENDENTE'", [request.user.id, note, accessRequest.id, request.user.company_id])
+      await audit(request.user, 'RECUSAR_ACESSO', 'SOLICITACOES_ENTRADA', accessRequest.id, { status: 'PENDENTE' }, { status: 'RECUSADA', note })
+      return response.json({ id: accessRequest.id, status: 'RECUSADA' })
+    }
+    if (decision !== 'APROVAR') return response.status(400).json({ error: 'Escolha aprovar ou recusar o pedido.' })
+    const roleName = String(request.body?.role || 'CONSULTA').toUpperCase()
+    if (roleName === 'ADMINISTRADOR') return response.status(400).json({ error: 'O perfil de administrador não pode ser atribuído por este fluxo.' })
+    const role = await db.get('SELECT id, name FROM roles WHERE name = ?', [roleName])
+    if (!role) return response.status(400).json({ error: 'Selecione um perfil válido.' })
+    const existing = await db.get('SELECT id FROM users WHERE company_id = ? AND lower(trim(email)) = ?', [request.user.company_id, accessRequest.email])
+    if (existing) return response.status(409).json({ error: 'Este e-mail já possui uma conta nesta empresa.' })
+    const userId = id()
+    await db.transaction(async () => {
+      const claim = await db.run("UPDATE company_access_requests SET status = 'APROVADA', password_hash = '', linked_user_id = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ? AND status = 'PENDENTE'", [userId, request.user.id, accessRequest.id, request.user.company_id])
+      if (!claim.changes) throw new Error('Este pedido já foi analisado.')
+      await db.run('INSERT INTO users (id, company_id, name, email, password_hash, phone, job_title) VALUES (?, ?, ?, ?, ?, ?, ?)', [userId, request.user.company_id, accessRequest.name, accessRequest.email, accessRequest.password_hash, accessRequest.phone, accessRequest.job_title])
+      await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
+    })
+    await audit(request.user, 'APROVAR_ACESSO', 'SOLICITACOES_ENTRADA', accessRequest.id, { status: 'PENDENTE' }, { status: 'APROVADA', user_id: userId, role: role.name })
+    response.json({ id: accessRequest.id, status: 'APROVADA', user_id: userId, role: role.name })
+  } catch (error) { if (error.message.includes('UNIQUE')) return response.status(409).json({ error: 'Este e-mail já possui uma conta nesta empresa.' }); if (error.message.includes('já foi analisado')) return response.status(409).json({ error: error.message }); errorResponse(response, error) }
 })
 
 app.get('/api/users', auth, requireAdministrator, async (request, response) => {
