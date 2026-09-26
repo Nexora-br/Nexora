@@ -19,8 +19,44 @@ const port = process.env.PORT || 3333
 const isProduction = process.env.NODE_ENV === 'production'
 const jwtSecret = process.env.NEXORA_JWT_SECRET || (!isProduction ? 'nexora-development-secret-change-me' : (() => { throw new Error('NEXORA_JWT_SECRET deve ser configurado em produção.') })())
 const frontendOrigin = process.env.FRONTEND_ORIGIN
+app.disable('x-powered-by')
+if (isProduction) app.set('trust proxy', 1)
+app.use((_request, response, next) => {
+  response.setHeader('X-Content-Type-Options', 'nosniff')
+  response.setHeader('X-Frame-Options', 'DENY')
+  response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  if (isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  if (response.req.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store')
+  next()
+})
 app.use(cors(isProduction ? { origin: frontendOrigin, credentials: false } : { origin: true }))
 app.use(express.json({ limit: '2mb' }))
+const requestWindows = new Map()
+function limitRequests({ windowMs, max, message }) {
+  return (request, response, next) => {
+    const now = Date.now()
+    const key = `${request.path}:${request.ip || request.socket.remoteAddress || 'unknown'}`
+    let entry = requestWindows.get(key)
+    if (!entry || entry.resetAt <= now) entry = { count: 0, resetAt: now + windowMs }
+    if (!requestWindows.has(key) && requestWindows.size >= 5000) {
+      for (const [storedKey, stored] of requestWindows) if (stored.resetAt <= now) requestWindows.delete(storedKey)
+      if (requestWindows.size >= 5000) return response.status(429).json({ error: message })
+    }
+    entry.count += 1
+    requestWindows.set(key, entry)
+    response.setHeader('RateLimit-Limit', String(max))
+    response.setHeader('RateLimit-Remaining', String(Math.max(0, max - entry.count)))
+    response.setHeader('RateLimit-Reset', String(Math.ceil(entry.resetAt / 1000)))
+    if (entry.count > max) {
+      response.setHeader('Retry-After', String(Math.max(1, Math.ceil((entry.resetAt - now) / 1000))))
+      return response.status(429).json({ error: message })
+    }
+    next()
+  }
+}
+const loginRateLimit = limitRequests({ windowMs: 15 * 60 * 1000, max: 15, message: 'Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.' })
+const registrationRateLimit = limitRequests({ windowMs: 60 * 60 * 1000, max: 5, message: 'Muitas tentativas de cadastro. Tente novamente mais tarde.' })
 const id = () => crypto.randomUUID()
 const tokenFor = (user) => jwt.sign({ userId: user.id, companyId: user.company_id, role: user.role }, jwtSecret, { expiresIn: '12h' })
 const paginationFor = (request) => { const requestedPage = Number.parseInt(request.query.page, 10); const requestedPageSize = Number.parseInt(request.query.pageSize, 10); const page = Number.isFinite(requestedPage) ? Math.max(1, requestedPage) : 1; const pageSize = Number.isFinite(requestedPageSize) ? Math.min(100, Math.max(1, requestedPageSize)) : 20; return { page, pageSize, offset: (page - 1) * pageSize, requested: request.query.page !== undefined || request.query.pageSize !== undefined } }
@@ -37,7 +73,33 @@ async function ensureStorageBucket() {
   if (!storageReady) storageReady = supabase.storage.getBucket(storageBucket).then(async ({ data, error }) => { if (data) return true; if (error && !/not found/i.test(error.message || '')) throw error; const created = await supabase.storage.createBucket(storageBucket, { public: false }); if (created.error && !/already exists/i.test(created.error.message || '')) throw created.error; return true })
   return storageReady
 }
-const upload = multer({ storage: supabase ? multer.memoryStorage() : multer.diskStorage({ destination: (request, _file, callback) => { const directory = path.join(uploadRoot, request.user.company_id); fs.mkdirSync(directory, { recursive: true }); callback(null, directory) }, filename: (_request, file, callback) => callback(null, `${crypto.randomUUID()}${path.extname(file.originalname).toLowerCase()}`) }), limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: (_request, file, callback) => callback(null, ['application/pdf', 'image/png', 'image/jpeg', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(file.mimetype)) })
+const allowedUploadTypes = {
+  'application/pdf': ['.pdf'],
+  'image/png': ['.png'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+}
+const upload = multer({
+  storage: supabase ? multer.memoryStorage() : multer.diskStorage({
+    destination: (request, _file, callback) => {
+      const directory = path.join(uploadRoot, request.user.company_id)
+      fs.mkdirSync(directory, { recursive: true })
+      callback(null, directory)
+    },
+    filename: (_request, file, callback) => callback(null, crypto.randomUUID() + path.extname(file.originalname).toLowerCase()),
+  }),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 8, fieldSize: 32 * 1024 },
+  fileFilter: (_request, file, callback) => callback(null, Boolean(allowedUploadTypes[file.mimetype]?.includes(path.extname(file.originalname).toLowerCase()))),
+})
+async function hasValidUploadSignature(file) {
+  const buffer = file.buffer || await fs.promises.readFile(file.path)
+  if (file.mimetype === 'application/pdf') return buffer.subarray(0, 5).toString() === '%PDF-'
+  if (file.mimetype === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  if (file.mimetype === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff
+  if (file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04
+  return false
+}
 
 async function auth(request, response, next) {
   try {
@@ -55,7 +117,7 @@ function requireRole(...allowedRoles) { return (request, response, next) => allo
 function requirePermission(module, action) { return (request, response, next) => { const permissions = request.user.permissions || []; if (request.user.role === 'ADMINISTRADOR' || permissions.includes('*.*') || permissions.includes(`${module}.${action}`)) return next(); return response.status(403).json({ error: 'Você não possui permissão para realizar esta ação.' }) } }
 function requireAdministrator(request, response, next) { return request.user.role === 'ADMINISTRADOR' ? next() : response.status(403).json({ error: 'Apenas administradores podem gerenciar usuários e permissões.' }) }
 async function audit(user, action, module, recordId, oldValue = null, newValue = null) { await db.run('INSERT INTO audit_logs (id, company_id, user_id, action, module, record_id, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [id(), user.company_id, user.id, action, module, recordId, oldValue ? JSON.stringify(oldValue) : null, newValue ? JSON.stringify(newValue) : null]) }
-const routePermission = (request) => { const path = request.path; const module = path.startsWith('/api/dashboard') || path.startsWith('/api/global-search') ? 'dashboard' : path.startsWith('/api/work-diaries') ? 'work_diary' : path.startsWith('/api/employees') ? 'employees' : path.startsWith('/api/teams') ? 'teams' : path.startsWith('/api/accounts-') ? 'finance' : path.startsWith('/api/transactions') || path.startsWith('/api/cost-centers') ? 'finance' : path.startsWith('/api/purchase-') ? 'purchases' : path.startsWith('/api/quotations') ? 'quotations' : path.startsWith('/api/inventory') || path.startsWith('/api/products') || path.startsWith('/api/categories') || path.startsWith('/api/storage-locations') ? 'inventory' : path.startsWith('/api/suppliers') ? 'suppliers' : path.startsWith('/api/clients') ? 'clients' : path.startsWith('/api/projects') ? 'projects' : path.startsWith('/api/equipment') ? 'equipment' : path.startsWith('/api/maintenance') ? 'maintenance' : path.startsWith('/api/field-activities') ? 'agenda' : path.startsWith('/api/documents') ? 'documents' : path.startsWith('/api/audit-logs') ? 'audit' : path.startsWith('/api/users') ? 'users' : null; if (!module) return null; if (module === 'employees' && path.endsWith('/rehire')) return [module, 'create']; if (module === 'employees' && request.method === 'POST' && path.includes('/documents')) return [module, 'upload']; if (request.method === 'GET') return [module, path.endsWith('/export') ? 'export' : path.endsWith('/download') ? 'download' : 'view']; if (path.endsWith('/archive')) return [module, 'archive']; if (path.endsWith('/pay')) return [module, 'pay']; if (path.endsWith('/receive')) return [module, 'receive']; if (request.method === 'POST' && (path.includes('/approve') || path.includes('/select'))) return [module, 'approve']; if (request.method === 'POST') return [module, 'create']; if (request.method === 'PUT' || request.method === 'PATCH') return [module, 'edit']; if (request.method === 'DELETE') return [module, 'delete']; return null }
+const routePermission = (request) => { const path = request.path; const module = path.startsWith('/api/dashboard') || path.startsWith('/api/global-search') ? 'dashboard' : path.startsWith('/api/work-diaries') ? 'work_diary' : path.startsWith('/api/employees') ? 'employees' : path.startsWith('/api/teams') ? 'teams' : path.startsWith('/api/accounts-') ? 'finance' : path.startsWith('/api/transactions') || path.startsWith('/api/cost-centers') ? 'finance' : path.startsWith('/api/purchase-') ? 'purchases' : path.startsWith('/api/quotations') ? 'quotations' : path.startsWith('/api/inventory') || path.startsWith('/api/products') || path.startsWith('/api/categories') || path.startsWith('/api/storage-locations') ? 'inventory' : path.startsWith('/api/suppliers') ? 'suppliers' : path.startsWith('/api/clients') ? 'clients' : path.startsWith('/api/projects') ? 'projects' : path.startsWith('/api/equipment') ? 'equipment' : path.startsWith('/api/maintenance') ? 'maintenance' : path.startsWith('/api/field-activities') ? 'agenda' : path.startsWith('/api/documents') ? 'documents' : path.startsWith('/api/audit-logs') ? 'audit' : path.startsWith('/api/users') ? 'users' : null; if (!module) return null; if (module === 'employees' && path.endsWith('/rehire')) return [module, 'create']; if (request.method === 'POST' && module === 'documents' && path.endsWith('/upload')) return [module, 'upload']; if (module === 'employees' && request.method === 'POST' && path.includes('/documents')) return [module, 'upload']; if (request.method === 'GET') return [module, path.endsWith('/export') ? 'export' : path.endsWith('/download') ? 'download' : 'view']; if (path.endsWith('/archive')) return [module, 'archive']; if (path.endsWith('/pay')) return [module, 'pay']; if (path.endsWith('/receive')) return [module, 'receive']; if (request.method === 'POST' && (path.includes('/approve') || path.includes('/select'))) return [module, 'approve']; if (request.method === 'POST') return [module, 'create']; if (request.method === 'PUT' || request.method === 'PATCH') return [module, 'edit']; if (request.method === 'DELETE') return [module, 'delete']; return null }
 app.use((request, response, next) => { if (request.path.startsWith('/api/auth') || request.path === '/api/health') return next(); const permission = routePermission(request); if (!permission) return next(); auth(request, response, () => requirePermission(permission[0], permission[1])(request, response, next)) })
 
 app.get('/api/health', (_request, response) => response.json({ status: 'ok', service: 'nexora-api', database: process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite local' }))
@@ -272,14 +334,16 @@ function buildFallbackAiAnswer(intent, context) {
   return projectCount > 0 ? `A empresa possui ${projectCount} projeto(s) em andamento.` : 'Não há dados disponíveis para o resumo da empresa.'
 }
 
-app.post('/api/auth/register', async (request, response) => {
+app.post('/api/auth/register', registrationRateLimit, async (request, response) => {
   try {
     const { companyName, legalName, cnpj, userName, email, password } = request.body || {}
     const normalizedEmail = String(email || '').trim().toLowerCase()
     const normalizedCompany = String(companyName || '').trim()
     const normalizedName = String(userName || '').trim()
     if (!normalizedCompany || !normalizedName || !normalizedEmail || !password) return response.status(400).json({ error: 'Empresa, administrador, e-mail e senha são obrigatórios.' })
+    if (normalizedCompany.length > 160 || normalizedName.length > 160 || normalizedEmail.length > 254) return response.status(400).json({ error: 'Um ou mais campos excedem o tamanho permitido.' })
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return response.status(400).json({ error: 'Informe um endereço de e-mail válido.' })
+    if (String(password).length < 12 || Buffer.byteLength(String(password), 'utf8') > 72) return response.status(400).json({ error: 'A senha deve ter pelo menos 12 caracteres e no máximo 72 bytes.' })
     const companyId = id()
     const userId = id()
     const passwordHash = await bcrypt.hash(String(password), 12)
@@ -297,11 +361,11 @@ app.post('/api/auth/register', async (request, response) => {
     errorResponse(response, error)
   }
 })
-app.post('/api/auth/login', async (request, response) => {
+app.post('/api/auth/login', loginRateLimit, async (request, response) => {
   try {
     const email = String(request.body?.email || '').trim().toLowerCase()
     const password = String(request.body?.password || '')
-    if (!email || !password) return response.status(401).json({ error: 'E-mail ou senha inválidos.' })
+    if (!email || !password || email.length > 254 || Buffer.byteLength(password, 'utf8') > 72) return response.status(401).json({ error: 'E-mail ou senha inválidos.' })
     const candidates = await db.all("SELECT u.*, (SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = u.id ORDER BY CASE r.name WHEN 'ADMINISTRADOR' THEN 0 ELSE 1 END LIMIT 1) AS role FROM users u WHERE lower(trim(u.email)) = ? AND u.status = ? ORDER BY u.created_at ASC", [email, 'ATIVO'])
     let user = null
     for (const candidate of candidates) {
@@ -315,9 +379,47 @@ app.post('/api/auth/login', async (request, response) => {
     response.json({ token: tokenFor(user), user: cleanUser(user), company })
   } catch (error) { errorResponse(response, error) }
 })
-app.post('/api/auth/change-password', auth, async (request, response) => { try { const passwordHash = await bcrypt.hash(request.body.password, 12); await db.run('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [passwordHash, request.user.id, request.user.company_id]); response.json({ ok: true }) } catch (error) { errorResponse(response, error) } })
+app.post('/api/auth/change-password', auth, async (request, response) => {
+  try {
+    const currentPassword = String(request.body?.currentPassword || '')
+    const password = String(request.body?.password || '')
+    if (!currentPassword || !await bcrypt.compare(currentPassword, request.user.password_hash)) return response.status(401).json({ error: 'A senha atual está incorreta.' })
+    if (password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) return response.status(400).json({ error: 'A nova senha deve ter pelo menos 12 caracteres e no máximo 72 bytes.' })
+    if (password === currentPassword) return response.status(400).json({ error: 'Escolha uma senha diferente da atual.' })
+    const passwordHash = await bcrypt.hash(password, 12)
+    await db.run('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [passwordHash, request.user.id, request.user.company_id])
+    response.json({ ok: true })
+  } catch (error) { errorResponse(response, error) }
+})
 
-app.get('/api/dashboard', auth, async (request, response) => { try { const companyId = request.user.company_id; const [projects, field, payable, receivable, stock, maintenance, purchases, documents, transactions] = await Promise.all([db.get("SELECT COUNT(*) AS total FROM projects WHERE company_id = ? AND status NOT IN ('FINALIZADO', 'CANCELADO')", [companyId]), db.get("SELECT COUNT(*) AS total FROM field_activities WHERE company_id = ? AND status = 'AGENDADA'", [companyId]), db.get("SELECT COALESCE(SUM(amount), 0) AS total FROM accounts_payable WHERE company_id = ? AND status = 'PENDENTE'", [companyId]), db.get("SELECT COALESCE(SUM(amount), 0) AS total FROM accounts_receivable WHERE company_id = ? AND status = 'PENDENTE'", [companyId]), db.get('SELECT COALESCE(SUM(quantity), 0) AS total, COALESCE(SUM(reserved_quantity), 0) AS reserved FROM inventory WHERE company_id = ?', [companyId]), db.get("SELECT COUNT(*) AS total FROM maintenance_records WHERE company_id = ? AND status IN ('AGENDADA', 'EM_ANDAMENTO')", [companyId]), db.get("SELECT COUNT(*) AS total FROM purchase_requests WHERE company_id = ? AND status NOT IN ('APROVADA', 'CANCELADA')", [companyId]), db.get('SELECT COUNT(*) AS total FROM documents WHERE company_id = ? AND archived = 0', [companyId]), db.get("SELECT COALESCE(SUM(CASE WHEN type = 'ENTRADA' THEN amount ELSE 0 END), 0) AS income, COALESCE(SUM(CASE WHEN type = 'SAIDA' THEN amount ELSE 0 END), 0) AS expense FROM financial_transactions WHERE company_id = ? AND status = 'CONFIRMADA'", [companyId])]); response.json({ stats: [{ label: 'Projetos em andamento', value: String(projects.total), detail: 'Dados atualizados agora', tone: 'blue', icon: 'Factory' }, { label: 'Obras em campo', value: String(field.total), detail: 'Atividades agendadas', tone: 'orange', icon: 'Truck' }, { label: 'Estoque comprometido', value: `${stock.total ? Math.round((stock.reserved / stock.total) * 100) : 0}%`, detail: 'Reservas reais', tone: 'green', icon: 'Warehouse' }, { label: 'A receber', value: `R$ ${Number(receivable.total).toLocaleString('pt-BR')}`, detail: 'Contas pendentes', tone: 'purple', icon: 'ClipboardList' }], financial: { payable: payable.total, receivable: receivable.total, income: transactions.income, expense: transactions.expense, result: transactions.income - transactions.expense }, operational: { openMaintenance: maintenance.total, pendingPurchases: purchases.total, documents: documents.total }, companyId }) } catch (error) { errorResponse(response, error) } })
+app.get('/api/dashboard', auth, async (request, response) => {
+  try {
+    const companyId = request.user.company_id
+    const permissions = request.user.permissions || []
+    const can = (module) => request.user.role === 'ADMINISTRADOR' || permissions.includes('*.*') || permissions.includes(module + '.view')
+    const [projects, field, payable, receivable, stock, maintenance, purchases, documents, transactions] = await Promise.all([
+      can('projects') ? db.get("SELECT COUNT(*) AS total FROM projects WHERE company_id = ? AND status NOT IN ('FINALIZADO', 'CANCELADO')", [companyId]) : Promise.resolve({ total: 0 }),
+      can('agenda') ? db.get("SELECT COUNT(*) AS total FROM field_activities WHERE company_id = ? AND status = 'AGENDADA'", [companyId]) : Promise.resolve({ total: 0 }),
+      can('finance') ? db.get("SELECT COALESCE(SUM(amount), 0) AS total FROM accounts_payable WHERE company_id = ? AND status = 'PENDENTE'", [companyId]) : Promise.resolve({ total: 0 }),
+      can('finance') ? db.get("SELECT COALESCE(SUM(amount), 0) AS total FROM accounts_receivable WHERE company_id = ? AND status = 'PENDENTE'", [companyId]) : Promise.resolve({ total: 0 }),
+      can('inventory') ? db.get('SELECT COALESCE(SUM(quantity), 0) AS total, COALESCE(SUM(reserved_quantity), 0) AS reserved FROM inventory WHERE company_id = ?', [companyId]) : Promise.resolve({ total: 0, reserved: 0 }),
+      can('maintenance') ? db.get("SELECT COUNT(*) AS total FROM maintenance_records WHERE company_id = ? AND status IN ('AGENDADA', 'EM_ANDAMENTO')", [companyId]) : Promise.resolve({ total: 0 }),
+      can('purchases') ? db.get("SELECT COUNT(*) AS total FROM purchase_requests WHERE company_id = ? AND status NOT IN ('APROVADA', 'CANCELADA')", [companyId]) : Promise.resolve({ total: 0 }),
+      can('documents') ? db.get('SELECT COUNT(*) AS total FROM documents WHERE company_id = ? AND archived = 0', [companyId]) : Promise.resolve({ total: 0 }),
+      can('finance') ? db.get("SELECT COALESCE(SUM(CASE WHEN type = 'ENTRADA' THEN amount ELSE 0 END), 0) AS income, COALESCE(SUM(CASE WHEN type = 'SAIDA' THEN amount ELSE 0 END), 0) AS expense FROM financial_transactions WHERE company_id = ? AND status = 'CONFIRMADA'", [companyId]) : Promise.resolve({ income: 0, expense: 0 }),
+    ])
+    const stats = []
+    if (can('projects')) stats.push({ label: 'Projetos em andamento', value: String(projects.total), detail: 'Dados atualizados agora', tone: 'blue', icon: 'Factory' })
+    if (can('agenda')) stats.push({ label: 'Obras em campo', value: String(field.total), detail: 'Atividades agendadas', tone: 'orange', icon: 'Truck' })
+    if (can('inventory')) stats.push({ label: 'Estoque comprometido', value: (stock.total ? Math.round((stock.reserved / stock.total) * 100) : 0) + '%', detail: 'Reservas reais', tone: 'green', icon: 'Warehouse' })
+    if (can('finance')) stats.push({ label: 'A receber', value: 'R$ ' + Number(receivable.total).toLocaleString('pt-BR'), detail: 'Contas pendentes', tone: 'purple', icon: 'ClipboardList' })
+    const operational = {}
+    if (can('maintenance')) operational.openMaintenance = maintenance.total
+    if (can('purchases')) operational.pendingPurchases = purchases.total
+    if (can('documents')) operational.documents = documents.total
+    response.json({ stats, ...(can('finance') ? { financial: { payable: payable.total, receivable: receivable.total, income: transactions.income, expense: transactions.expense, result: transactions.income - transactions.expense } } : {}), operational, companyId })
+  } catch (error) { errorResponse(response, error) }
+})
 app.get('/api/projects', auth, async (request, response) => { try { const pagination = paginationFor(request); const params = [request.user.company_id]; const where = ['company_id = ?']; if (request.query.search) { where.push('(name LIKE ? OR code LIKE ? OR location LIKE ?)'); const term = `%${request.query.search}%`; params.push(term, term, term) } if (request.query.status) { where.push('status = ?'); params.push(request.query.status) } if (request.query.from) { where.push('date(start_date) >= date(?)'); params.push(request.query.from) } if (request.query.to) { where.push('date(end_date) <= date(?)'); params.push(request.query.to) } const { field, direction } = sortFor(request, ['name', 'code', 'status', 'start_date', 'end_date', 'created_at']); const count = await db.get(`SELECT COUNT(*) AS total FROM projects WHERE ${where.join(' AND ')}`, params); const rows = await db.all(`SELECT id, code, name, contractor_document AS contractorDocument, location, start_date AS startDate, end_date AS endDate, progress, status, CASE WHEN end_date IS NULL THEN 'A definir' ELSE strftime('%d/%m/%Y', end_date) END AS due, CASE status WHEN 'EM_EXECUCAO' THEN 'blue' WHEN 'EM_MONTAGEM' THEN 'orange' ELSE 'green' END AS tone FROM projects WHERE ${where.join(' AND ')} ORDER BY ${field} ${direction} LIMIT ? OFFSET ?`, [...params, pagination.pageSize, pagination.offset]); response.json(pagination.requested ? { data: rows, pagination: { page: pagination.page, pageSize: pagination.pageSize, total: count.total, totalPages: Math.ceil(count.total / pagination.pageSize) } } : rows) } catch (error) { errorResponse(response, error) } })
 app.post('/api/projects', auth, requireRole('ADMINISTRADOR', 'DIRETOR', 'GERENTE', 'SUPERVISOR'), async (request, response) => { try { const body = request.body; if (!body.name) return response.status(400).json({ error: 'Nome da obra é obrigatório.' }); const project = { id: id(), code: body.code || `NX-${Date.now().toString().slice(-4)}`, name: body.name, contractorDocument: body.contractorDocument || null, location: body.location || null, startDate: body.startDate || null, endDate: body.endDate || null, progress: Number(body.progress || 0), status: body.status || 'PLANEJAMENTO' }; await db.run('INSERT INTO projects (id, company_id, code, name, contractor_document, location, start_date, end_date, progress, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [project.id, request.user.company_id, project.code, project.name, project.contractorDocument, project.location, project.startDate, project.endDate, project.progress, project.status]); await audit(request.user, 'CRIAR', 'PROJETOS', project.id, null, project); response.status(201).json(project) } catch (error) { errorResponse(response, error) } })
 app.put('/api/projects/:id', auth, requireRole('ADMINISTRADOR', 'DIRETOR', 'GERENTE', 'SUPERVISOR'), async (request, response) => { try { const previous = await db.get('SELECT * FROM projects WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!previous) return response.status(404).json({ error: 'Projeto não encontrado.' }); const next = { ...previous, ...request.body }; await db.run('UPDATE projects SET name = ?, contractor_document = ?, location = ?, start_date = ?, end_date = ?, progress = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [next.name, next.contractorDocument, next.location, next.startDate, next.endDate, next.progress, next.status, previous.id, request.user.company_id]); await audit(request.user, 'EDITAR', 'PROJETOS', previous.id, previous, next); response.json(next) } catch (error) { errorResponse(response, error) } })
@@ -328,9 +430,29 @@ app.post('/api/clients/:id/archive', auth, requireRole('ADMINISTRADOR', 'DIRETOR
 app.delete('/api/clients/:id', auth, requireRole('ADMINISTRADOR'), async (request, response) => { try { const previous = await db.get('SELECT * FROM clients WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!previous) return response.status(404).json({ error: 'Cliente não encontrado.' }); await db.run('DELETE FROM clients WHERE id = ? AND company_id = ?', [previous.id, request.user.company_id]); await audit(request.user, 'EXCLUIR', 'CLIENTES', previous.id, previous, null); response.status(204).end() } catch (error) { errorResponse(response, error) } })
 app.get('/api/audit-logs', auth, async (request, response) => { try { const pagination = paginationFor(request); const params = [request.user.company_id]; const where = ['a.company_id = ?']; if (request.query.module) { where.push('a.module = ?'); params.push(request.query.module) } if (request.query.action) { where.push('a.action = ?'); params.push(request.query.action) } if (request.query.recordId) { where.push('a.record_id = ?'); params.push(request.query.recordId) } if (request.query.from) { where.push('date(a.created_at) >= date(?)'); params.push(request.query.from) } if (request.query.to) { where.push('date(a.created_at) <= date(?)'); params.push(request.query.to) } const count = await db.get(`SELECT COUNT(*) AS total FROM audit_logs a WHERE ${where.join(' AND ')}`, params); const rows = await db.all(`SELECT a.*, u.name AS user_name FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id AND u.company_id = a.company_id WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC LIMIT ? OFFSET ?`, [...params, pagination.pageSize, pagination.offset]); response.json(pagination.requested || Object.keys(request.query).length ? { data: rows, pagination: { page: pagination.page, pageSize: pagination.pageSize, total: count.total, totalPages: Math.ceil(count.total / pagination.pageSize) } } : rows) } catch (error) { errorResponse(response, error) } })
 app.get('/api/audit-logs/by-entity/:recordId', auth, async (request, response) => { try { const params = [request.user.company_id, request.params.recordId]; const where = ['a.company_id = ?', 'a.record_id = ?']; if (request.query.module) { where.push('a.module = ?'); params.push(request.query.module) } const rows = await db.all(`SELECT a.*, u.name AS user_name FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id AND u.company_id = a.company_id WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC`, params); response.json(rows) } catch (error) { errorResponse(response, error) } })
-app.get('/api/global-search', auth, async (request, response) => { try { const term = `%${String(request.query.q || '')}%`; const companyId = request.user.company_id; const [projects, clients, products, suppliers, equipment, documents, activities, payables] = await Promise.all([db.all('SELECT id, name, code, "Projetos" AS category FROM projects WHERE company_id = ? AND (name LIKE ? OR code LIKE ?) LIMIT 10', [companyId, term, term]), db.all('SELECT id, legal_name AS name, "Clientes" AS category FROM clients WHERE company_id = ? AND (legal_name LIKE ? OR trade_name LIKE ?) LIMIT 10', [companyId, term, term]), db.all('SELECT id, name, "Produtos" AS category FROM products WHERE company_id = ? AND name LIKE ? LIMIT 10', [companyId, term]), db.all('SELECT id, legal_name AS name, "Fornecedores" AS category FROM suppliers WHERE company_id = ? AND (legal_name LIKE ? OR trade_name LIKE ?) LIMIT 10', [companyId, term, term]), db.all('SELECT id, name, code, "Equipamentos" AS category FROM equipment WHERE company_id = ? AND (name LIKE ? OR code LIKE ?) LIMIT 10', [companyId, term, term]), db.all('SELECT id, name, "Documentos" AS category FROM documents WHERE company_id = ? AND archived = 0 AND name LIKE ? LIMIT 10', [companyId, term]), db.all('SELECT id, title AS name, "Agenda" AS category FROM field_activities WHERE company_id = ? AND title LIKE ? LIMIT 10', [companyId, term]), db.all('SELECT id, description AS name, "Financeiro" AS category FROM accounts_payable WHERE company_id = ? AND description LIKE ? LIMIT 10', [companyId, term])]); response.json([...projects, ...clients, ...products, ...suppliers, ...equipment, ...documents, ...activities, ...payables]) } catch (error) { errorResponse(response, error) } })
-
-app.post('/api/documents/upload', auth, upload.single('file'), async (request, response) => { try { if (!request.file) return response.status(400).json({ error: 'Arquivo inválido ou ausente.' }); const document = { id: id(), name: request.body.name || request.file.originalname, category: request.body.category || 'Outros', path: request.file.path, size: request.file.size, mimeType: request.file.mimetype, relatedEntity: request.body.related_entity || null, relatedId: request.body.related_id || null }; if (supabase) { await ensureStorageBucket(); const storagePath = `${request.user.company_id}/${document.id}${path.extname(request.file.originalname).toLowerCase()}`; const stored = await supabase.storage.from(storageBucket).upload(storagePath, request.file.buffer, { contentType: document.mimeType, upsert: false }); if (stored.error) throw stored.error; document.path = `supabase:${storagePath}` } await db.run('INSERT INTO documents (id, company_id, name, category, path, size, mime_type, uploaded_by, related_entity, related_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [document.id, request.user.company_id, document.name, document.category, document.path, document.size, document.mimeType, request.user.id, document.relatedEntity, document.relatedId]); await audit(request.user, 'UPLOAD', 'DOCUMENTOS', document.id, null, document); response.status(201).json({ ...document, downloadUrl: `/api/documents/${document.id}/download` }) } catch (error) { errorResponse(response, error) } })
+app.get('/api/global-search', auth, async (request, response) => {
+  try {
+    const query = String(request.query.q || '').trim().slice(0, 100)
+    if (query.length < 2) return response.json([])
+    const term = '%' + query + '%'
+    const companyId = request.user.company_id
+    const [projects, clients, products, suppliers, equipment, documents, activities, payables] = await Promise.all([
+      db.all('SELECT id, name, code, "Projetos" AS category FROM projects WHERE company_id = ? AND (name LIKE ? OR code LIKE ?) LIMIT 10', [companyId, term, term]),
+      db.all('SELECT id, legal_name AS name, "Clientes" AS category FROM clients WHERE company_id = ? AND (legal_name LIKE ? OR trade_name LIKE ?) LIMIT 10', [companyId, term, term]),
+      db.all('SELECT id, name, "Produtos" AS category FROM products WHERE company_id = ? AND name LIKE ? LIMIT 10', [companyId, term]),
+      db.all('SELECT id, legal_name AS name, "Fornecedores" AS category FROM suppliers WHERE company_id = ? AND (legal_name LIKE ? OR trade_name LIKE ?) LIMIT 10', [companyId, term, term]),
+      db.all('SELECT id, name, code, "Equipamentos" AS category FROM equipment WHERE company_id = ? AND (name LIKE ? OR code LIKE ?) LIMIT 10', [companyId, term, term]),
+      db.all('SELECT id, name, "Documentos" AS category FROM documents WHERE company_id = ? AND archived = 0 AND name LIKE ? LIMIT 10', [companyId, term]),
+      db.all('SELECT id, title AS name, "Agenda" AS category FROM field_activities WHERE company_id = ? AND title LIKE ? LIMIT 10', [companyId, term]),
+      db.all('SELECT id, description AS name, "Financeiro" AS category FROM accounts_payable WHERE company_id = ? AND description LIKE ? LIMIT 10', [companyId, term, term]),
+    ])
+    const permissions = request.user.permissions || []
+    const allowed = (module) => request.user.role === 'ADMINISTRADOR' || permissions.includes('*.*') || permissions.includes(module + '.view')
+    const modules = { Projetos: 'projects', Clientes: 'clients', Produtos: 'inventory', Fornecedores: 'suppliers', Equipamentos: 'equipment', Documentos: 'documents', Agenda: 'agenda', Financeiro: 'finance' }
+    response.json([...projects, ...clients, ...products, ...suppliers, ...equipment, ...documents, ...activities, ...payables].filter((item) => allowed(modules[item.category])))
+  } catch (error) { errorResponse(response, error) }
+})
+app.post('/api/documents/upload', auth, upload.single('file'), async (request, response) => { try { if (!request.file) return response.status(400).json({ error: 'Arquivo inválido ou ausente.' }); if (!(await hasValidUploadSignature(request.file))) { if (request.file.path) await fs.promises.unlink(request.file.path).catch(() => {}); return response.status(400).json({ error: 'O conteúdo do arquivo não corresponde ao tipo permitido.' }) } const document = { id: id(), name: request.body.name || request.file.originalname, category: request.body.category || 'Outros', path: request.file.path, size: request.file.size, mimeType: request.file.mimetype, relatedEntity: request.body.related_entity || null, relatedId: request.body.related_id || null }; if (supabase) { await ensureStorageBucket(); const storagePath = `${request.user.company_id}/${document.id}${path.extname(request.file.originalname).toLowerCase()}`; const stored = await supabase.storage.from(storageBucket).upload(storagePath, request.file.buffer, { contentType: document.mimeType, upsert: false }); if (stored.error) throw stored.error; document.path = `supabase:${storagePath}` } await db.run('INSERT INTO documents (id, company_id, name, category, path, size, mime_type, uploaded_by, related_entity, related_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [document.id, request.user.company_id, document.name, document.category, document.path, document.size, document.mimeType, request.user.id, document.relatedEntity, document.relatedId]); await audit(request.user, 'UPLOAD', 'DOCUMENTOS', document.id, null, document); response.status(201).json({ ...document, downloadUrl: `/api/documents/${document.id}/download` }) } catch (error) { errorResponse(response, error) } })
 app.get('/api/documents/:id/download', auth, async (request, response) => { try { const document = await db.get('SELECT * FROM documents WHERE id = ? AND company_id = ? AND archived = 0', [request.params.id, request.user.company_id]); if (!document) return response.status(404).json({ error: 'Documento não encontrado.' }); await audit(request.user, 'DOWNLOAD', 'DOCUMENTOS', document.id); if (supabase && document.path?.startsWith('supabase:')) { const file = await supabase.storage.from(storageBucket).download(document.path.slice('supabase:'.length)); if (file.error) throw file.error; response.type(document.mime_type || 'application/octet-stream'); response.attachment(document.name); return response.send(Buffer.from(await file.data.arrayBuffer())) } if (!fs.existsSync(document.path)) return response.status(404).json({ error: 'Documento não encontrado.' }); response.download(document.path, document.name) } catch (error) { errorResponse(response, error) } })
 app.post('/api/documents/:id/archive', auth, requireRole('ADMINISTRADOR', 'DIRETOR', 'GERENTE'), async (request, response) => { try { const document = await db.get('SELECT * FROM documents WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!document) return response.status(404).json({ error: 'Documento não encontrado.' }); await db.run('UPDATE documents SET archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [document.id, request.user.company_id]); await audit(request.user, 'ARQUIVAR', 'DOCUMENTOS', document.id, document, { ...document, archived: 1 }); response.json({ ok: true }) } catch (error) { errorResponse(response, error) } })
 
@@ -455,6 +577,7 @@ app.post('/api/users', auth, requireAdministrator, async (request, response) => 
   try {
     const { name, email, password, phone, job_title: jobTitle, role_id: roleId } = request.body || {}
     if (!name || !email || !password || !roleId) return response.status(400).json({ error: 'Nome, e-mail, senha e perfil são obrigatórios.' })
+    if (String(password).length < 12 || Buffer.byteLength(String(password), 'utf8') > 72) return response.status(400).json({ error: 'A senha deve ter pelo menos 12 caracteres e no máximo 72 bytes.' })
     const role = await db.get('SELECT id, name FROM roles WHERE id = ?', [roleId])
     if (!role) return response.status(400).json({ error: 'Perfil inválido.' })
     const userId = id()
@@ -504,7 +627,7 @@ app.patch('/api/users/:id/status', auth, requireAdministrator, async (request, r
 app.post('/api/users/:id/reset-password', auth, requireAdministrator, async (request, response) => {
   try {
     const password = String(request.body?.password || '')
-    if (password.length < 8) return response.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres.' })
+    if (password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) return response.status(400).json({ error: 'A senha deve ter pelo menos 12 caracteres e no máximo 72 bytes.' })
     const user = await db.get('SELECT id, name, email FROM users WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id])
     if (!user) return response.status(404).json({ error: 'Usuário não encontrado.' })
     await db.run('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [await bcrypt.hash(password, 12), request.params.id, request.user.company_id])
