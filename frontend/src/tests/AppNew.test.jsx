@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppNew, AuthScreen, ClientsPage, HistoryPanel, Pagination, ProjectsPage, StockPage, SuppliersPage } from '../AppNew'
 import { canAccess } from '../permissions'
 
-const jsonResponse = (body, ok = true, status = ok ? 200 : 500) => ({ ok, status, json: async () => body })
+const jsonResponse = (body, ok = true, status = ok ? 200 : 500) => ({ ok, status, headers: { get: () => 'application/json' }, json: async () => body })
 
 beforeEach(() => {
   localStorage.clear()
@@ -71,17 +71,18 @@ describe('autenticação', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'E-mail ou senha inválidos.' }, false, 401)))
     const user = userEvent.setup()
     render(<AppNew />)
+    await user.click(screen.getByRole('button', { name: /Área restrita/ }))
     await user.type(screen.getByLabelText('E-mail corporativo'), 'invalido@test')
     await user.type(screen.getByLabelText('Senha'), 'errada')
     await user.click(screen.getByRole('button', { name: /Entrar no Nexora/ }))
     await waitFor(() => expect(screen.getByText('E-mail ou senha inválidos.')).toBeInTheDocument())
   })
 
-  it('exibe tela pública sem sessão e não consulta API', () => {
+  it('exibe página pública sem sessão e não consulta API', () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
     render(<AppNew />)
-    expect(screen.getByText('Acesse sua operação')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Área restrita/ })).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -92,6 +93,7 @@ describe('autenticação', () => {
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
     render(<AppNew />)
+    await user.click(screen.getByRole('button', { name: /Área restrita/ }))
     await user.type(screen.getByLabelText('E-mail corporativo'), 'joao@test')
     await user.type(screen.getByLabelText('Senha'), 'senha123')
     await user.click(screen.getByRole('button', { name: /Entrar no Nexora/ }))
@@ -115,7 +117,7 @@ describe('autenticação', () => {
     await waitFor(() => expect(screen.getByTitle('Sair')).toBeInTheDocument())
     await user.click(screen.getByTitle('Sair'))
     expect(localStorage.getItem('nexora-session')).toBeNull()
-    expect(screen.getByText('Acesse sua operação')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Área restrita/ })).toBeInTheDocument()
   })
 })
 

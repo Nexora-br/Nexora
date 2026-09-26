@@ -1,4 +1,6 @@
 const test = require('node:test')
+process.env.NODE_ENV = 'test'
+process.env.NEXORA_ENABLE_SIMULATED_BILLING = 'true'
 const assert = require('node:assert/strict')
 const request = require('supertest')
 const bcrypt = require('bcryptjs')
@@ -7,11 +9,28 @@ const database = require('../db')
 const { app } = require('../server')
 const { createAiProvider } = require('../ai-provider')
 
+let cnpjSequence = Date.now() % 1000000000000
+function nextValidCnpj() {
+  const base = String(cnpjSequence++).padStart(12, '0')
+  const digit = (value, weights) => { const sum = [...value].reduce((total, character, index) => total + Number(character) * weights[index], 0); const remainder = sum % 11; return remainder < 2 ? 0 : 11 - remainder }
+  const first = digit(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+  const second = digit(`${base}${first}`, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+  return `${base}${first}${second}`
+}
+
 async function register(companyName) {
   const email = `${companyName.toLowerCase().replace(/[^a-z]/g, '')}-${Date.now()}@test.local`
-  const response = await request(app).post('/api/auth/register').send({ companyName, userName: 'Administrador', email, password: 'senha123' })
+  const response = await request(app).post('/api/auth/register').send({ companyName, legalName: companyName, cnpj: nextValidCnpj(), userName: 'Administrador', email, password: 'senha123-TESTE' })
   assert.equal(response.status, 201)
   return response.body
+}
+
+async function addRecipient(companyId) {
+  const role = await database.get('SELECT id FROM roles WHERE name = ?', ['GESTOR'])
+  const userId = crypto.randomUUID()
+  await database.run('INSERT INTO users (id, company_id, name, email, password_hash) VALUES (?, ?, ?, ?, ?)', [userId, companyId, 'Destinatário', `destinatario-${userId}@test.local`, await bcrypt.hash('senha123', 4)])
+  await database.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
+  return userId
 }
 
 test('bloqueia endpoints protegidos sem token', async () => {
@@ -50,6 +69,74 @@ test('isola projetos entre empresas', async () => {
   const otherProjects = await request(app).get('/api/projects').set('Authorization', `Bearer ${second.token}`)
   assert.equal(otherProjects.status, 200)
   assert.equal(otherProjects.body.some((project) => project.name === 'Obra exclusiva A'), false)
+})
+
+test('simulador inicia sem assinatura automática e isola assinaturas e pagamentos por empresa', async () => {
+  const first = await register('Empresa Assinatura A')
+  const second = await register('Empresa Assinatura B')
+  const firstHeaders = { Authorization: `Bearer ${first.token}` }
+  const secondHeaders = { Authorization: `Bearer ${second.token}` }
+
+  assert.equal((await database.get('SELECT id FROM subscriptions WHERE company_id = ?', [first.company.id])), undefined)
+  assert.equal((await request(app).get('/api/subscription').set(firstHeaders)).body.subscription, null)
+  const checkout = await request(app).post('/api/subscription/checkout').set(firstHeaders).send({ method: 'CARTAO', cardNumber: 'nao-deve-ser-recebido', cvv: '123' })
+  assert.equal(checkout.status, 201)
+  assert.equal(checkout.body.subscription.status, 'ATIVA')
+  assert.equal(checkout.body.subscription.amount, 500)
+  assert.equal(checkout.body.subscription.payment_method, 'CARTAO')
+  assert.ok(checkout.body.subscription.next_charge_at)
+  assert.equal(checkout.body.payments[0].status, 'APROVADO')
+  assert.equal(Object.hasOwn(checkout.body, 'cardNumber'), false)
+  assert.equal((await request(app).get('/api/subscription').set(secondHeaders)).body.subscription, null)
+  assert.equal((await database.get('SELECT COUNT(*) AS count FROM subscription_payments WHERE company_id = ?', [second.company.id])).count, 0)
+})
+
+test('verificação opcional identifica empresas sem assinatura sem bloquear o administrador', async () => {
+  const session = await register('Empresa Verificacao Plano')
+  const role = await database.get('SELECT id FROM roles WHERE name = ?', ['GESTOR'])
+  const userId = crypto.randomUUID()
+  const email = `gerente-${Date.now()}@test.local`
+  await database.run('INSERT INTO users (id, company_id, name, email, password_hash) VALUES (?, ?, ?, ?, ?)', [userId, session.company.id, 'Gerente', email, await bcrypt.hash('senha123', 4)])
+  await database.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
+  const login = await request(app).post('/api/auth/login').send({ email, password: 'senha123' })
+  assert.equal(login.status, 200)
+  const original = process.env.NEXORA_ENFORCE_SUBSCRIPTIONS
+  process.env.NEXORA_ENFORCE_SUBSCRIPTIONS = 'true'
+  try {
+    assert.equal((await request(app).get('/api/projects').set('Authorization', `Bearer ${login.body.token}`)).status, 402)
+    assert.equal((await request(app).get('/api/projects').set('Authorization', `Bearer ${session.token}`)).status, 200)
+    assert.equal((await request(app).get('/api/subscription').set('Authorization', `Bearer ${login.body.token}`)).status, 200)
+  } finally {
+    if (original === undefined) delete process.env.NEXORA_ENFORCE_SUBSCRIPTIONS
+    else process.env.NEXORA_ENFORCE_SUBSCRIPTIONS = original
+  }
+})
+
+test('administrador pode simular pendência, aprovação, recusa, renovação, cancelamento e expiração', async () => {
+  const session = await register('Empresa Ciclo Assinatura')
+  const headers = { Authorization: `Bearer ${session.token}` }
+  let result = await request(app).post('/api/subscription/admin-action').set(headers).send({ action: 'CRIAR_COBRANCA', method: 'PIX' })
+  assert.equal(result.status, 200)
+  assert.equal(result.body.subscription.status, 'PENDENTE')
+  assert.equal(result.body.payments[0].status, 'PENDENTE')
+  result = await request(app).post('/api/subscription/admin-action').set(headers).send({ action: 'APROVAR_PAGAMENTO' })
+  assert.equal(result.body.subscription.status, 'ATIVA')
+  result = await request(app).post('/api/subscription/admin-action').set(headers).send({ action: 'RENOVAR', method: 'BOLETO' })
+  assert.equal(result.body.subscription.status, 'ATIVA')
+  assert.equal(result.body.subscription.payment_method, 'BOLETO')
+  assert.ok(result.body.payments.some((payment) => payment.event_type === 'RENOVACAO'))
+  result = await request(app).post('/api/subscription/admin-action').set(headers).send({ action: 'CANCELAR' })
+  assert.equal(result.body.subscription.status, 'CANCELADA')
+  assert.equal(result.body.subscription.next_charge_at, null)
+  result = await request(app).post('/api/subscription/admin-action').set(headers).send({ action: 'EXPIRAR' })
+  assert.equal(result.body.subscription.status, 'EXPIRADA')
+
+  const declined = await register('Empresa Pagamento Recusado')
+  const declinedHeaders = { Authorization: `Bearer ${declined.token}` }
+  await request(app).post('/api/subscription/admin-action').set(declinedHeaders).send({ action: 'CRIAR_COBRANCA', method: 'PIX' })
+  result = await request(app).post('/api/subscription/admin-action').set(declinedHeaders).send({ action: 'RECUSAR_PAGAMENTO' })
+  assert.equal(result.body.subscription.status, 'PENDENTE')
+  assert.equal(result.body.payments[0].status, 'RECUSADO')
 })
 
 test('persiste produto, entrada e saldo por movimentação', async () => {
@@ -326,7 +413,7 @@ test('administrador gerencia usuários, perfis, permissões e auditoria no próp
   assert.equal(roles.status, 200)
   const consulta = roles.body.find((role) => role.name === 'CONSULTA')
   assert.ok(consulta)
-  const created = await request(app).post('/api/users').set(headers).send({ name: 'Usuário Operacional', email: `operacional-${Date.now()}@test.local`, password: 'senha123', role_id: consulta.id })
+  const created = await request(app).post('/api/users').set(headers).send({ name: 'Usuário Operacional', email: `operacional-${Date.now()}@test.local`, password: 'senha123-TESTE', role_id: consulta.id })
   assert.equal(created.status, 201)
   assert.equal(Object.hasOwn(created.body, 'password_hash'), false)
   const users = await request(app).get('/api/users?search=Operacional').set(headers)
@@ -392,35 +479,37 @@ test('dashboard overview retorna indicadores reais e oculta financeiro sem permi
 test('tarefas têm CRUD, filtros, status, paginação, auditoria e isolamento por tenant', async () => {
   const first = await register('Empresa Tarefas A')
   const second = await register('Empresa Tarefas B')
+  const recipientId = await addRecipient(first.company.id)
   const headers = { Authorization: `Bearer ${first.token}` }
-  const created = await request(app).post('/api/tasks').set(headers).send({ title: 'Conferir instalação', description: 'Validar checklist', responsible: 'Equipe Campo', due_date: '2026-09-30', priority: 'ALTA', status: 'PENDENTE' })
+  const created = await request(app).post('/api/tasks').set(headers).send({ title: 'Conferir instalação', description: 'Validar checklist', recipient_ids: [recipientId], responsible: 'Equipe Campo', due_date: '2026-09-30', priority: 'ALTA', status: 'PENDENTE' })
   assert.equal(created.status, 201)
-  const listed = await request(app).get('/api/tasks?search=checklist&page=1&pageSize=1&sort=due_date').set(headers)
+  const listed = await request(app).get('/api/tasks?folder=sent&search=checklist&page=1&pageSize=1&sort=due_date').set(headers)
   assert.equal(listed.status, 200)
-  assert.equal(listed.body.pagination.total, 1)
+  assert.equal(listed.body.data.length, 1)
   assert.equal(listed.body.data[0].id, created.body.id)
-  const edited = await request(app).put(`/api/tasks/${created.body.id}`).set(headers).send({ title: 'Checklist atualizado', priority: 'URGENTE', responsible: 'Supervisor' })
-  assert.equal(edited.status, 200)
-  assert.equal(edited.body.priority, 'URGENTE')
-  assert.equal((await request(app).patch(`/api/tasks/${created.body.id}/status`).set(headers).send({ status: 'CONCLUIDA' })).status, 200)
-  assert.equal((await request(app).patch(`/api/tasks/${created.body.id}/status`).set(headers).send({ status: 'PENDENTE' })).status, 200)
-  assert.equal((await request(app).post(`/api/tasks/${created.body.id}/archive`).set(headers).send()).status, 200)
-  assert.equal((await request(app).get(`/api/tasks?search=Checklist`).set(headers)).body.pagination.total, 0)
+  assert.equal((await request(app).get(`/api/tasks/${created.body.id}`).set(headers)).status, 200)
+  const recipient = await database.get('SELECT email FROM users WHERE id = ?', [recipientId])
+  const recipientSession = await request(app).post('/api/auth/login').send({ email: recipient.email, password: 'senha123' })
+  assert.equal(recipientSession.status, 200)
+  const recipientHeaders = { Authorization: `Bearer ${recipientSession.body.token}` }
+  assert.equal((await request(app).post(`/api/tasks/${created.body.id}/messages`).set(recipientHeaders).send({ message: 'Recebido pela equipe.' })).status, 201)
+  assert.equal((await request(app).patch(`/api/tasks/${created.body.id}/status`).set(recipientHeaders).send({ status: 'EM_ANDAMENTO' })).status, 200)
+  assert.equal((await request(app).get('/api/tasks?folder=sent&search=checklist').set(headers)).body.data.length, 1)
+  assert.equal((await request(app).post(`/api/tasks/${created.body.id}/cancel`).set(headers).send()).status, 200)
   const other = await request(app).get('/api/tasks').set('Authorization', `Bearer ${second.token}`)
   assert.equal(other.body.data.some((task) => task.id === created.body.id), false)
   const audit = await request(app).get(`/api/audit-logs?module=TAREFAS&recordId=${created.body.id}`).set(headers)
-  assert.equal(audit.body.data.some((entry) => entry.action === 'CRIAR'), true)
-  assert.equal(audit.body.data.some((entry) => entry.action === 'CONCLUIR'), true)
-  assert.equal(audit.body.data.some((entry) => entry.action === 'ARQUIVAR'), true)
-  assert.equal((await request(app).delete(`/api/tasks/${created.body.id}`).set(headers)).status, 204)
+  assert.equal(audit.body.data.some((entry) => entry.action === 'ENVIAR_SOLICITACAO'), true)
+  assert.equal(audit.body.data.some((entry) => entry.action === 'CANCELAR_SOLICITACAO'), true)
 })
 
 test('overview de projeto retorna relacionamentos reais e respeita tenant/financeiro', async () => {
   const first = await register('Empresa Projetos Overview A')
   const second = await register('Empresa Projetos Overview B')
   const headers = { Authorization: `Bearer ${first.token}` }
+  const recipientId = await addRecipient(first.company.id)
   const project = await request(app).post('/api/projects').set(headers).send({ name: 'Projeto Detalhado', status: 'EM_EXECUCAO' })
-  await request(app).post('/api/tasks').set(headers).send({ project_id: project.body.id, title: 'Tarefa do projeto' })
+  await request(app).post('/api/tasks').set(headers).send({ project_id: project.body.id, title: 'Tarefa do projeto', description: 'Descrição da tarefa', recipient_ids: [recipientId] })
   await request(app).post('/api/accounts-payable').set(headers).send({ project_id: project.body.id, description: 'Custo do projeto', due_date: '2026-10-01', amount: 300 })
   const overview = await request(app).get(`/api/projects/${project.body.id}/overview`).set(headers)
   assert.equal(overview.status, 200)
