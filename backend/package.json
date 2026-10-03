@@ -4,8 +4,8 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "NEXORA_ENABLE_SIMULATED_BILLING=true node server.js",
+    "dev": "NEXORA_ENABLE_SIMULATED_BILLING=true node --watch server.js",
     "seed": "node seed.js",
     "test": "node --test tests/api.test.js"
   },
