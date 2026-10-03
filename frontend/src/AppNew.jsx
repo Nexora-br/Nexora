@@ -61,21 +61,20 @@ async function fetchAuthResponse(url, body) {
     }
   }
 
-  const contentType = response.headers.get('content-type') || ''
-  let result
+  const contentType = response?.headers?.get?.('content-type') || ''
+  let result = null
 
   try {
-    if (!contentType.includes('application/json')) {
-      const text = await response.text()
-      console.error('Backend response is not JSON:', { status: response.status, contentType, text })
-
-      if (!response.ok) {
-        throw new Error(`Erro do servidor (${response.status}). Tente novamente em instantes.`)
-      }
-      throw new Error('O servidor da Nexora está temporariamente indisponível. Tente novamente em instantes.')
+    if (!contentType || contentType.includes('application/json') || contentType.includes('+json')) {
+      result = await response.json().catch(() => null)
+    } else if (typeof response.text === 'function') {
+      const raw = await response.text()
+      if (!raw) throw new Error('Resposta vazia do servidor.')
+      result = JSON.parse(raw)
+    } else {
+      result = await response.json().catch(() => null)
     }
 
-    result = await response.json().catch(() => null)
     if (!result || typeof result !== 'object') {
       throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
     }
@@ -84,10 +83,13 @@ async function fetchAuthResponse(url, body) {
       throw new Error(result.error)
     }
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
+    if (error instanceof SyntaxError || error?.message === 'Resposta vazia do servidor.') {
+      throw new Error('O servidor da Nexora está temporariamente indisponível. Tente novamente em instantes.')
     }
-    throw error
+    if (error instanceof Error && error.message !== 'O servidor da Nexora respondeu de forma inesperada. Tente novamente.') {
+      throw error
+    }
+    throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
   }
 
   return { response, result }

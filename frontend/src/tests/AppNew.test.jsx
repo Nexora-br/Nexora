@@ -122,6 +122,25 @@ describe('autenticação', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('/auth/login')
   })
 
+  it('aceita resposta JSON válida mesmo sem header Content-Type', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => '' },
+        json: async () => ({ token: 'token-json-sem-header', user: { id: 'u1', name: 'João', email: 'joao@test', role: 'ADMINISTRADOR', permissions: ['*.*'], companyId: 'c1' }, company: { name: 'Empresa Real' } }),
+      })
+      .mockImplementation((url) => Promise.resolve(jsonResponse(url.includes('/dashboard') ? { stats: [] } : [])))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    render(<AppNew />)
+    await user.click(screen.getByRole('button', { name: /Área restrita/ }))
+    await user.type(screen.getByLabelText('E-mail corporativo'), 'joao@test')
+    await user.type(screen.getByLabelText('Senha'), 'senha123')
+    await user.click(screen.getByRole('button', { name: /Entrar no Nexora/ }))
+    await waitFor(() => expect(localStorage.getItem('nexora-session')).toContain('token-json-sem-header'))
+  })
+
   it('não exibe dados fictícios quando a rota protegida retorna 401', async () => {
     localStorage.setItem('nexora-session', JSON.stringify({ token: 'token-expirado', userName: 'João', companyName: 'Empresa', role: 'CONSULTA', permissions: [] }))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'Sessão inválida.' }, false, 401)))
