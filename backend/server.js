@@ -1,3 +1,4 @@
+require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const crypto = require('crypto')
@@ -7,6 +8,7 @@ const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
 const { createClient } = require('@supabase/supabase-js')
+const { config, buildCorsOptions } = require('./config')
 const db = require('./db')
 const createCrudRoutes = require('./crud-routes')
 const createWorkDiaryRoutes = require('./work-diary-routes')
@@ -17,10 +19,10 @@ const { createSubscriptionRoutes } = require('./subscription-routes')
 const { createAiProvider } = require('./ai-provider')
 
 const app = express()
-const port = process.env.PORT || 3333
-const isProduction = process.env.NODE_ENV === 'production'
+const port = config.port
+const isProduction = config.isProduction
 const jwtSecret = process.env.NEXORA_JWT_SECRET || (!isProduction ? 'nexora-development-secret-change-me' : (() => { throw new Error('NEXORA_JWT_SECRET deve ser configurado em produção.') })())
-const frontendOrigin = process.env.FRONTEND_ORIGIN
+const frontendOrigin = config.frontendOrigin
 app.disable('x-powered-by')
 if (isProduction) app.set('trust proxy', 1)
 app.use((_request, response, next) => {
@@ -32,7 +34,7 @@ app.use((_request, response, next) => {
   if (response.req.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store')
   next()
 })
-app.use(cors(isProduction ? { origin: frontendOrigin, credentials: false } : { origin: true }))
+app.use(cors(buildCorsOptions({ frontendOrigin, isProduction })))
 app.use(express.json({ limit: '2mb' }))
 const requestWindows = new Map()
 function limitRequests({ windowMs, max, message }) {

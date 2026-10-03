@@ -1,4 +1,10 @@
-const { puter } = require('@heyputer/puter.js')
+let puter = null
+try {
+  const puterModule = require('@heyputer/puter.js')
+  puter = puterModule?.puter || null
+} catch (error) {
+  console.warn('[ai-provider] Puter.js indisponível; usando fallback local para manter o backend estável em nuvem.')
+}
 
 function buildLocalReadOnlyProvider() {
   return {
@@ -131,6 +137,11 @@ function createAiProvider() {
   }
 
   if (providerName === 'puter') {
+    if (!puter || !puter.ai || typeof puter.ai.chat !== 'function') {
+      console.warn('[ai-provider] Provider Puter indisponível; usando fallback local.')
+      return buildLocalReadOnlyProvider()
+    }
+
     return {
       name: 'puter',
       async generate({ context, userMessage, systemPrompt }) {
