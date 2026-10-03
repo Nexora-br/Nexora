@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nexora</title>
+  <script>
+    const base = '/Nexora/';
+    const path = window.location.pathname.slice(base.length);
+    if (path) {
+      sessionStorage.redirect = '/' + path;
+    }
+    window.location.pathname = base;
+  </script>
+</head>
+<body></body>
+</html>
