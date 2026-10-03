@@ -1,28 +1,17 @@
 {
   "version": 2,
+  "framework": "vite",
+  "installCommand": "npm install --prefix frontend",
   "buildCommand": "npm --prefix frontend run build",
   "outputDirectory": "frontend/dist",
-  "installCommand": "npm --prefix frontend install",
-  "framework": "vite",
-  "build": {
-    "env": {
-      "VITE_ENABLE_SIMULATED_BILLING": "true"
-    }
-  },
-  "headers": [
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://nexora-backend-w7aa.onrender.com/api/:path*"
+    },
     {
       "source": "/(.*)",
-      "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "DENY" },
-        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
-        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
-        { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" }
-      ]
+      "destination": "/index.html"
     }
-  ],
-  "rewrites": [
-    { "source": "/api/:path*", "destination": "https://nexora-backend-w7aa.onrender.com/api/:path*" },
-    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
