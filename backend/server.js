@@ -135,7 +135,31 @@ app.use('/api', (request, response, next) => { if (request.subscriptionEnforceme
 
 app.get('/api/health', (_request, response) => response.json({ status: 'ok', service: 'nexora-api', database: process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite local', commit: process.env.RENDER_GIT_COMMIT || null }))
 
-const MAX_AI_MESSAGE_LENGTH = 500
+app.get('/api/diagnostics', async (_request, response) => {
+  try {
+    const checks = {
+      database: process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite',
+      nodeEnv: process.env.NODE_ENV,
+      hasJwtSecret: Boolean(process.env.NEXORA_JWT_SECRET),
+      hasFrontendOrigin: Boolean(process.env.FRONTEND_ORIGIN),
+      frontendOrigin: process.env.FRONTEND_ORIGIN || 'not set',
+    }
+
+    db.get('SELECT 1 as test', [], (error, row) => {
+      if (error) {
+        checks.database_status = `ERROR: ${error.message}`
+        checks.database_code = error.code
+        checks.database_detail = error.detail
+        return response.status(503).json(checks)
+      }
+      checks.database_status = 'connected'
+      response.json(checks)
+    })
+  } catch (error) {
+    response.status(500).json({ error: error.message })
+  }
+})
+
 const aiModuleMap = {
   finance: ['finance', 'view'],
   projects: ['projects', 'view'],
