@@ -1,6 +1,12 @@
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim()
-const defaultApiUrl = import.meta.env.DEV
-  ? 'http://localhost:3333/api'
-  : '/api'
+export function resolveApiUrl(env = import.meta.env) {
+  const configuredApiUrl = env.VITE_API_URL?.trim()
+  if (configuredApiUrl) return configuredApiUrl.replace(/\/+$/, '')
 
-export const API_URL = ((import.meta.env.DEV && configuredApiUrl) || defaultApiUrl).replace(/\/+$/, '')
+  const defaultApiUrl = env.DEV
+    ? 'http://localhost:3333/api'
+    : '/api'
+
+  return defaultApiUrl.replace(/\/+$/, '')
+}
+
+export const API_URL = resolveApiUrl()
