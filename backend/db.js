@@ -5,35 +5,8 @@ const { AsyncLocalStorage } = require('async_hooks')
 const usingPostgres = Boolean(process.env.DATABASE_URL)
 const sqlite3 = usingPostgres ? null : require('sqlite3').verbose()
 const transactionContext = new AsyncLocalStorage()
-
-let postgresPool = null
+const postgresPool = usingPostgres ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined }) : null
 let postgresReady = Promise.resolve()
-let postgresError = null
-
-if (usingPostgres) {
-	try {
-		postgresPool = new Pool({
-			connectionString: process.env.DATABASE_URL,
-			ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
-			connectionTimeoutMillis: 5000,
-			idleTimeoutMillis: 30000,
-			max: 20,
-		})
-
-		postgresPool.on('error', (error) => {
-			postgresError = error
-			console.error('PostgreSQL Pool Error:', error.message, error.code)
-		})
-
-		postgresPool.on('connect', () => {
-			postgresError = null
-			console.log('PostgreSQL connected successfully')
-		})
-	} catch (error) {
-		postgresError = error
-		console.error('Failed to create PostgreSQL Pool:', error.message)
-	}
-}
 
 function postgresSql(sql) {
 	const ignoredInsert = /\bINSERT OR IGNORE\b/i.test(sql)
@@ -60,49 +33,31 @@ function enqueuePostgres(work) {
 
 function postgresDatabase() {
 	const execute = (sql, params) => {
-		if (postgresError) {
-			const error = new Error(`Database connection error: ${postgresError.message} (${postgresError.code})`)
-			error.originalError = postgresError
-			return Promise.reject(error)
-		}
 		const client = transactionContext.getStore()
 		if (client) return client.query(postgresSql(sql), params)
-		return enqueuePostgres(() => postgresPool.query(postgresSql(sql), params)).catch((error) => {
-			console.error('PostgreSQL Query Error:', {
-				code: error.code,
-				message: error.message,
-				detail: error.detail,
-				sql: sql.substring(0, 100),
-			})
-			throw error
-		})
+		return enqueuePostgres(() => postgresPool.query(postgresSql(sql), params))
 	}
 	return {
-		exec(sql) {
-			execute(sql).catch((error) => console.error('DB Exec Error:', error.message))
-		},
+		exec(sql) { enqueuePostgres(() => postgresPool.query(postgresSql(sql))).catch((error) => console.error(error)) },
 		run(sql, params, callback) {
 			if (typeof params === 'function') { callback = params; params = [] }
 			execute(sql, params || []).then(
 				(result) => callback?.call({ lastID: null, changes: result.rowCount }, null),
-				(error) => { if (callback) callback.call({ lastID: null, changes: 0 }, error); else console.error('DB Run Error:', error.message) },
+				(error) => { if (callback) callback.call({ lastID: null, changes: 0 }, error); else console.error(error) },
 			)
 			return this
 		},
 		get(sql, params, callback) {
 			if (typeof params === 'function') { callback = params; params = [] }
-			execute(sql, params || []).then((result) => callback?.(null, result.rows[0]), (error) => { if (callback) callback(error); else console.error('DB Get Error:', error.message) })
+			execute(sql, params || []).then((result) => callback?.(null, result.rows[0]), (error) => { if (callback) callback(error); else console.error(error) })
 			return this
 		},
 		all(sql, params, callback) {
 			if (typeof params === 'function') { callback = params; params = [] }
-			execute(sql, params || []).then((result) => callback?.(null, result.rows), (error) => { if (callback) callback(error); else console.error('DB All Error:', error.message) })
+			execute(sql, params || []).then((result) => callback?.(null, result.rows), (error) => { if (callback) callback(error); else console.error(error) })
 			return this
 		},
-		close(callback) {
-			if (!postgresPool) return callback?.(null)
-			postgresPool.end().then(() => callback?.(null), (error) => { if (callback) callback(error); else console.error('DB Close Error:', error.message) })
-		},
+		close(callback) { postgresPool.end().then(() => callback?.(null), (error) => { if (callback) callback(error); else console.error(error) }) },
 	}
 }
 
