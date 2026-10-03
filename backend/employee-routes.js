@@ -64,6 +64,9 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
   async function employeeDocument(documentId, companyId) {
     return db.get('SELECT d.* FROM employee_documents d JOIN employees e ON e.id = d.employee_id AND e.company_id = d.company_id WHERE d.id = ? AND d.company_id = ?', [documentId, companyId])
   }
+  async function folder(folderId, companyId) {
+    return db.get('SELECT * FROM employee_document_folders WHERE id = ? AND company_id = ?', [folderId, companyId])
+  }
   function publicDocument(document) {
     const { storage_path: _storagePath, ...metadata } = document
     return { ...metadata, download_url: `/api/employees/documents/${document.id}/download` }
@@ -112,11 +115,12 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
     try {
       const record = await employee(request.params.id, request.user.company_id)
       if (!record) return response.status(404).json({ error: 'Funcionário não encontrado.' })
-      const [documents, employmentHistory] = await Promise.all([
+      const [documents, employmentHistory, folders] = await Promise.all([
         db.all('SELECT * FROM employee_documents WHERE employee_id = ? AND company_id = ? ORDER BY created_at DESC', [record.id, request.user.company_id]),
         db.all('SELECT * FROM employee_employment_history WHERE employee_id = ? AND company_id = ? ORDER BY start_date DESC, created_at DESC', [record.id, request.user.company_id]),
+        db.all('SELECT * FROM employee_document_folders WHERE employee_id = ? AND company_id = ? ORDER BY name ASC', [record.id, request.user.company_id]),
       ])
-      response.json({ ...record, documents: documents.map(publicDocument), employment_history: employmentHistory })
+      response.json({ ...record, documents: documents.map(publicDocument), employment_history: employmentHistory, folders })
     } catch { response.status(500).json({ error: 'Não foi possível carregar o cadastro do funcionário.' }) }
   })
 
@@ -192,10 +196,12 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       if (!categories.has(category)) { if (file.path) await fs.promises.unlink(file.path).catch(() => {}); return response.status(400).json({ error: 'Selecione uma categoria válida para o documento.' }) }
       if (file.size > MAX_FILE_SIZE || !(await validSignature(file))) { if (file.path) await fs.promises.unlink(file.path).catch(() => {}); return response.status(400).json({ error: 'O arquivo é inválido ou excede 20 MB.' }) }
       if (!validDate(request.body.issue_date) || !validDate(request.body.expires_at)) { if (file.path) await fs.promises.unlink(file.path).catch(() => {}); return response.status(400).json({ error: 'Confira as datas do documento.' }) }
+      const folderId = request.body.folder_id ? String(request.body.folder_id) : null
+      if (folderId && !(await folder(folderId, request.user.company_id))) { if (file.path) await fs.promises.unlink(file.path).catch(() => {}); return response.status(400).json({ error: 'Pasta inválida.' }) }
       savedPath = await saveFile(file, record.id, request.user.company_id)
       const id = crypto.randomUUID()
       const name = path.basename(file.originalname).slice(0, 200)
-      await db.run('INSERT INTO employee_documents (id, company_id, employee_id, category, name, storage_path, file_size, mime_type, issue_date, expires_at, notes, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, request.user.company_id, record.id, category, name, savedPath, file.size, file.mimetype, request.body.issue_date || null, request.body.expires_at || null, String(request.body.notes || '').slice(0, 1000) || null, request.user.id])
+      await db.run('INSERT INTO employee_documents (id, company_id, employee_id, category, name, storage_path, file_size, mime_type, issue_date, expires_at, notes, uploaded_by, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, request.user.company_id, record.id, category, name, savedPath, file.size, file.mimetype, request.body.issue_date || null, request.body.expires_at || null, String(request.body.notes || '').slice(0, 1000) || null, request.user.id, folderId])
       const document = await db.get('SELECT * FROM employee_documents WHERE id = ? AND company_id = ?', [id, request.user.company_id])
       await audit(request.user, 'ANEXAR_DOCUMENTO', 'FUNCIONARIOS', id, null, { employee_id: record.id, category, name })
       response.status(201).json(publicDocument(document))
@@ -204,6 +210,66 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       else if (file.path) await fs.promises.unlink(file.path).catch(() => {})
       response.status(500).json({ error: 'Não foi possível anexar o documento.' })
     }
+  })
+
+  router.post('/api/employees/:id/folders', ...permission('upload'), async (request, response) => {
+    const name = String(request.body?.name || '').trim().slice(0, 120)
+    if (!name) return response.status(400).json({ error: 'Informe o nome da pasta.' })
+    try {
+      const record = await employee(request.params.id, request.user.company_id)
+      if (!record) return response.status(404).json({ error: 'Funcionário não encontrado.' })
+      let parentId = request.body?.parent_id ? String(request.body.parent_id) : null
+      if (parentId) {
+        const parent = await folder(parentId, request.user.company_id)
+        if (!parent || parent.employee_id !== record.id) return response.status(400).json({ error: 'Pasta-pai inválida.' })
+      }
+      const id = crypto.randomUUID()
+      await db.run('INSERT INTO employee_document_folders (id, company_id, employee_id, parent_id, name, created_by) VALUES (?, ?, ?, ?, ?, ?)', [id, request.user.company_id, record.id, parentId, name, request.user.id])
+      const created = await folder(id, request.user.company_id)
+      await audit(request.user, 'CRIAR_PASTA', 'FUNCIONARIOS', id, null, { employee_id: record.id, name, parent_id: parentId })
+      response.status(201).json(created)
+    } catch { response.status(500).json({ error: 'Não foi possível criar a pasta.' }) }
+  })
+
+  router.patch('/api/employees/folders/:folderId', ...permission('edit'), async (request, response) => {
+    const name = String(request.body?.name || '').trim().slice(0, 120)
+    if (!name) return response.status(400).json({ error: 'Informe o nome da pasta.' })
+    try {
+      const previous = await folder(request.params.folderId, request.user.company_id)
+      if (!previous) return response.status(404).json({ error: 'Pasta não encontrada.' })
+      await db.run('UPDATE employee_document_folders SET name = ? WHERE id = ? AND company_id = ?', [name, previous.id, request.user.company_id])
+      const updated = await folder(previous.id, request.user.company_id)
+      await audit(request.user, 'RENOMEAR_PASTA', 'FUNCIONARIOS', previous.id, { name: previous.name }, { name: updated.name })
+      response.json(updated)
+    } catch { response.status(500).json({ error: 'Não foi possível renomear a pasta.' }) }
+  })
+
+  router.delete('/api/employees/folders/:folderId', ...permission('delete'), async (request, response) => {
+    try {
+      const existing = await folder(request.params.folderId, request.user.company_id)
+      if (!existing) return response.status(404).json({ error: 'Pasta não encontrada.' })
+      const counts = await db.get('SELECT (SELECT COUNT(*) FROM employee_documents WHERE folder_id = ?) + (SELECT COUNT(*) FROM employee_document_folders WHERE parent_id = ?) AS total', [existing.id, existing.id])
+      if (Number(counts?.total || 0) > 0) return response.status(409).json({ error: 'A pasta precisa estar vazia para ser excluída.' })
+      await db.run('DELETE FROM employee_document_folders WHERE id = ? AND company_id = ?', [existing.id, request.user.company_id])
+      await audit(request.user, 'EXCLUIR_PASTA', 'FUNCIONARIOS', existing.id, { employee_id: existing.employee_id, name: existing.name }, null)
+      response.status(204).end()
+    } catch { response.status(500).json({ error: 'Não foi possível excluir a pasta.' }) }
+  })
+
+  router.patch('/api/employees/documents/:documentId', ...permission('upload'), async (request, response) => {
+    try {
+      const document = await employeeDocument(request.params.documentId, request.user.company_id)
+      if (!document) return response.status(404).json({ error: 'Documento não encontrado.' })
+      const folderId = request.body?.folder_id ? String(request.body.folder_id) : null
+      if (folderId) {
+        const target = await folder(folderId, request.user.company_id)
+        if (!target || target.employee_id !== document.employee_id) return response.status(400).json({ error: 'Pasta inválida.' })
+      }
+      await db.run('UPDATE employee_documents SET folder_id = ? WHERE id = ? AND company_id = ?', [folderId, document.id, request.user.company_id])
+      const updated = await db.get('SELECT * FROM employee_documents WHERE id = ? AND company_id = ?', [document.id, request.user.company_id])
+      await audit(request.user, 'MOVER_DOCUMENTO', 'FUNCIONARIOS', document.id, { folder_id: document.folder_id }, { folder_id: updated.folder_id })
+      response.json(publicDocument(updated))
+    } catch { response.status(500).json({ error: 'Não foi possível mover o documento.' }) }
   })
 
   router.get('/api/employees/documents/:documentId/download', ...permission('view'), ...permission('download'), async (request, response) => {

@@ -296,6 +296,19 @@ button, input, select, textarea { font-family: inherit; }
 .employee-upload-form .field input[type=file] { min-width:0; width:100%; padding:8px; border:1px solid #e0e9ed; border-radius:6px; color:#708995; background:#fff; font-size:10px; }
 .employee-upload-submit { display:flex; gap:8px; margin-top:10px; }
 .employee-upload-submit input { flex:1; min-width:0; padding:9px 10px; border:1px solid #e0e9ed; border-radius:6px; color:#456778; font-size:11px; }
+.employee-breadcrumb { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:4px 0 12px; }
+.employee-breadcrumb button { padding:5px 9px; border:0; border-radius:6px; color:#78919c; background:#f1f6f8; font-size:10px; font-weight:600; cursor:pointer; }
+.employee-breadcrumb button.active { color:#2f6c87; background:#dcedf3; }
+.employee-breadcrumb > span { display:flex; align-items:center; gap:6px; color:#aebcc3; }
+.employee-new-folder { margin-left:auto; }
+.employee-folder-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-bottom:14px; }
+.employee-folder-card { position:relative; display:flex; align-items:center; gap:6px; padding:10px; border:1px solid #e4eef2; border-radius:8px; background:#f8fbfc; }
+.employee-folder-open { display:flex; flex:1; min-width:0; flex-direction:column; align-items:flex-start; gap:4px; padding:0; border:0; background:transparent; cursor:pointer; text-align:left; }
+.employee-folder-open > span { overflow:hidden; width:100%; color:#365f74; font-size:11px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
+.employee-folder-open > small { color:#91a5ae; font-size:9px; }
+.employee-folder-card svg { color:#4883a0; }
+.employee-folder-card .table-action { padding:5px; }
+.employee-move-select { max-width:150px; padding:6px 8px; border:1px solid #e0e9ed; border-radius:6px; color:#607c89; background:#fff; font-size:10px; }
 .employee-document-list { margin-top:10px; }
 .employee-document-row { display:flex; align-items:center; gap:10px; padding:11px 2px; border-bottom:1px solid #edf2f4; }
 .employee-document-icon { display:grid; width:34px; height:34px; flex:0 0 34px; place-items:center; border-radius:8px; color:#4883a0; background:#eaf4f8; }
