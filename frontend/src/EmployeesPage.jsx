@@ -93,27 +93,35 @@ export function EmployeesPage({ session, can, notify }) {
       const url = URL.createObjectURL(await response.blob()); const anchor = window.document.createElement('a'); anchor.href = url; anchor.download = document.name; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
     } catch (problem) { notify(problem.message || 'Não foi possível baixar o documento.') }
   }
+  const [folderPrompt, setFolderPrompt] = useState(null)
+  const [confirmState, setConfirmState] = useState(null)
   async function deleteDocument(document) {
-    if (!window.confirm(`Excluir o documento “${document.name}”?`)) return
-    try { await request(`/employees/documents/${document.id}`, { method: 'DELETE' }); notify('Documento excluído.'); await openEmployee(detail); await load() }
-    catch (problem) { notify(problem.message || 'Não foi possível excluir o documento.') }
+    setConfirmState({ message: `Excluir o documento “${document.name}”?`, action: async () => {
+      try { await request(`/employees/documents/${document.id}`, { method: 'DELETE' }); notify('Documento excluído.'); await openEmployee(detail); await load() }
+      catch (problem) { notify(problem.message || 'Não foi possível excluir o documento.') }
+    } })
   }
-  async function createFolder(parentId) {
-    const name = window.prompt('Nome da nova pasta:')
-    if (!name?.trim()) return
-    try { await request(`/employees/${detail.id}/folders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim(), parent_id: parentId }) }); notify('Pasta criada.'); await openEmployee(detail) }
-    catch (problem) { notify(problem.message || 'Não foi possível criar a pasta.') }
+  function createFolder(parentId) { setFolderPrompt({ parentId, folder: null }) }
+  function renameFolder(folder) { setFolderPrompt({ parentId: folder.parent_id, folder }) }
+  async function submitFolderName(name) {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const { parentId, folder } = folderPrompt
+    try {
+      if (folder) {
+        if (trimmed !== folder.name) { await request(`/employees/folders/${folder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed }) }); notify('Pasta renomeada.') }
+      } else {
+        await request(`/employees/${detail.id}/folders`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: trimmed, parent_id: parentId }) })
+        notify('Pasta criada.')
+      }
+      setFolderPrompt(null); await openEmployee(detail)
+    } catch (problem) { notify(problem.message || 'Não foi possível salvar a pasta.') }
   }
-  async function renameFolder(folder) {
-    const name = window.prompt('Novo nome da pasta:', folder.name)
-    if (!name?.trim() || name.trim() === folder.name) return
-    try { await request(`/employees/folders/${folder.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name.trim() }) }); notify('Pasta renomeada.'); await openEmployee(detail) }
-    catch (problem) { notify(problem.message || 'Não foi possível renomear a pasta.') }
-  }
-  async function deleteFolder(folder) {
-    if (!window.confirm(`Excluir a pasta “${folder.name}”?`)) return
-    try { await request(`/employees/folders/${folder.id}`, { method: 'DELETE' }); notify('Pasta excluída.'); await openEmployee(detail) }
-    catch (problem) { notify(problem.message || 'Não foi possível excluir a pasta.') }
+  function deleteFolder(folder) {
+    setConfirmState({ message: `Excluir a pasta “${folder.name}”?`, action: async () => {
+      try { await request(`/employees/folders/${folder.id}`, { method: 'DELETE' }); notify('Pasta excluída.'); await openEmployee(detail) }
+      catch (problem) { notify(problem.message || 'Não foi possível excluir a pasta.') }
+    } })
   }
   async function moveDocument(document, folderId) {
     try { await request(`/employees/documents/${document.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folder_id: folderId }) }); notify('Documento movido.'); await openEmployee(detail) }
@@ -132,6 +140,8 @@ export function EmployeesPage({ session, can, notify }) {
     {detail && <EmployeeDetail employee={detail} can={can} onClose={() => setDetail(null)} onEdit={() => { setModal(detail); setDetail(null) }} onUpload={uploadDocument} onDownload={downloadDocument} onDelete={deleteDocument} onTerminate={() => setTerminating(detail)} onRehire={() => { setRehiring(detail); setDetail(null) }} onCreateFolder={createFolder} onRenameFolder={renameFolder} onDeleteFolder={deleteFolder} onMoveDocument={moveDocument} />}
     {rehiring && <RehireForm employee={rehiring} onClose={() => setRehiring(null)} onSubmit={rehireEmployee} />}
     {terminating && <div className="modal-layer" onClick={() => setTerminating(null)}><form className="modal-card employee-terminate" onClick={(event) => event.stopPropagation()} onSubmit={terminateEmployee}><button type="button" className="modal-x" onClick={() => setTerminating(null)}><X size={18} /></button><span className="section-kicker">DESLIGAMENTO</span><h2>Registrar demissão</h2><p>O cadastro e os documentos serão preservados no filtro “Demitidos”.</p><label className="field"><span>Data do desligamento</span><input name="termination_date" type="date" defaultValue={today()} required /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setTerminating(null)}>Cancelar</button><button className="blue-button"><AlertTriangle size={15} /> Confirmar desligamento</button></div></form></div>}
+    {folderPrompt && <FolderNameModal title={folderPrompt.folder ? 'Renomear pasta' : 'Nova pasta'} initial={folderPrompt.folder?.name || ''} onClose={() => setFolderPrompt(null)} onSubmit={submitFolderName} />}
+    {confirmState && <ConfirmModal message={confirmState.message} onClose={() => setConfirmState(null)} onConfirm={() => { const { action } = confirmState; setConfirmState(null); action() }} />}
   </>
 }
 
@@ -168,3 +178,9 @@ function EmployeeDetail({ employee, can, onClose, onEdit, onUpload, onDownload, 
 }
 function RehireForm({ employee, onClose, onSubmit }) { return <div className="modal-layer" onClick={onClose}><form className="modal-card employee-form" onClick={(event) => event.stopPropagation()} onSubmit={onSubmit}><button type="button" className="modal-x" onClick={onClose}><X size={18} /></button><span className="section-kicker">READMISSÃO</span><h2>Readmitir funcionário</h2><p>O cadastro e os documentos existentes serão mantidos. Um novo vínculo será iniciado.</p><label className="field"><span>Nova data de admissão</span><input name="admission_date" type="date" defaultValue={today()} required /></label><div className="form-grid"><label className="field"><span>Cargo / função</span><input name="job_title" defaultValue={employee.job_title || ''} /></label><label className="field"><span>Setor</span><input name="department" defaultValue={employee.department || ''} /></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancelar</button><button className="blue-button">Confirmar readmissão</button></div></form></div> }
 function EmployeeInfo({ icon: Icon, label, value }) { return <div className="employee-info"><span><Icon size={14} /> {label}</span><b>{value || 'Não informado'}</b></div> }
+function FolderNameModal({ title, initial, onClose, onSubmit }) {
+  return <div className="modal-layer" onClick={onClose}><form className="modal-card employee-small-modal" onClick={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); onSubmit(new FormData(event.currentTarget).get('name') || '') }}><button type="button" className="modal-x" onClick={onClose}><X size={18} /></button><span className="section-kicker">PASTA</span><h2>{title}</h2><label className="field"><span>Nome da pasta</span><input name="name" defaultValue={initial} maxLength={120} autoFocus required /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancelar</button><button className="blue-button">Salvar</button></div></form></div>
+}
+function ConfirmModal({ message, onClose, onConfirm }) {
+  return <div className="modal-layer" onClick={onClose}><div className="modal-card employee-small-modal" onClick={(event) => event.stopPropagation()}><button className="modal-x" onClick={onClose}><X size={18} /></button><span className="section-kicker">CONFIRMAÇÃO</span><p className="employee-confirm-text">{message}</p><div className="modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancelar</button><button className="table-action danger" onClick={onConfirm}><Trash2 size={14} /> Confirmar exclusão</button></div></div></div>
+}
