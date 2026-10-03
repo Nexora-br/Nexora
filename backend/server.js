@@ -15,6 +15,7 @@ const createTeamRoutes = require('./team-routes')
 const createTaskRoutes = require('./task-routes')
 const { createSubscriptionRoutes } = require('./subscription-routes')
 const { createAiProvider } = require('./ai-provider')
+const { config, buildCorsOptions } = require('./config')
 
 const app = express()
 const port = process.env.PORT || 3333
@@ -32,7 +33,8 @@ app.use((_request, response, next) => {
   if (response.req.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store')
   next()
 })
-app.use(cors(isProduction ? { origin: frontendOrigin, credentials: false } : { origin: true }))
+app.use(cors(buildCorsOptions()))
+app.options('*', cors(buildCorsOptions()))
 app.use(express.json({ limit: '2mb' }))
 const requestWindows = new Map()
 function limitRequests({ windowMs, max, message }) {
