@@ -60,10 +60,36 @@ async function fetchAuthResponse(url, body) {
       await wait(700 * (attempt + 1))
     }
   }
+
   const contentType = response.headers.get('content-type') || ''
-  if (!contentType.includes('application/json')) throw new Error('O servidor da Nexora está temporariamente indisponível. Tente novamente em instantes.')
-  const result = await response.json().catch(() => null)
-  if (!result || typeof result !== 'object') throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
+  let result
+
+  try {
+    if (!contentType.includes('application/json')) {
+      const text = await response.text()
+      console.error('Backend response is not JSON:', { status: response.status, contentType, text })
+
+      if (!response.ok) {
+        throw new Error(`Erro do servidor (${response.status}). Tente novamente em instantes.`)
+      }
+      throw new Error('O servidor da Nexora está temporariamente indisponível. Tente novamente em instantes.')
+    }
+
+    result = await response.json().catch(() => null)
+    if (!result || typeof result !== 'object') {
+      throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
+    }
+
+    if (!response.ok && result.error) {
+      throw new Error(result.error)
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error('O servidor da Nexora respondeu de forma inesperada. Tente novamente.')
+    }
+    throw error
+  }
+
   return { response, result }
 }
 let visualPageApi = {}

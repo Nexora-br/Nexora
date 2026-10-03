@@ -30,7 +30,7 @@ app.use((_request, response, next) => {
   response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
   response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
   if (isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
-  if (response.req.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store')
+  if (_request.path.startsWith('/api/')) response.setHeader('Cache-Control', 'no-store')
   next()
 })
 app.use(cors(buildCorsOptions()))

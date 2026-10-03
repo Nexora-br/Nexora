@@ -27,27 +27,35 @@ Frontend: endereço exibido pelo Vite, normalmente `http://localhost:5173`
 
 ## Deploy
 
-- Frontend: Vercel.
+- Frontend: GitHub Pages (deployment automático via GitHub Actions).
 - Backend: Render como serviço Node.js usando `npm start`.
 - Banco: SQLite atual em Persistent Disk do Render; não usar múltiplas instâncias sem migrar para PostgreSQL.
 - Uploads: `backend/storage/<company_id>` no mesmo Persistent Disk.
 
-Variáveis de ambiente do backend:
+### Frontend (GitHub Pages)
+
+Configurar um Secret no repositório GitHub: `VITE_API_URL`
+
+```
+https://<seu-backend>.onrender.com/api
+```
+
+O repositório deve ter GitHub Pages habilitado nas settings (fonte: GitHub Actions).
+
+### Backend (Render)
+
+Variáveis de ambiente obrigatórias:
 
 ```text
 NODE_ENV=production
 PORT=10000
 NEXORA_JWT_SECRET=<segredo forte configurado no painel do Render>
-FRONTEND_ORIGIN=https://<seu-frontend>.vercel.app
+FRONTEND_ORIGIN=https://<username>.github.io
 AI_PROVIDER=puter
 AI_API_KEY=
 ```
 
-Variável de ambiente do frontend na Vercel:
-
-```text
-VITE_API_URL=https://<seu-backend>.onrender.com/api
-```
+O backend aceita automaticamente domínios `*.github.io` para CORS em produção.
 
 O valor de `NEXORA_JWT_SECRET` deve ser criado somente no painel do Render. Não publique segredos no repositório.
 

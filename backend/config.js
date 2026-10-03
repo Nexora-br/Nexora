@@ -34,13 +34,16 @@ function buildCorsOptions({ frontendOrigin = config.frontendOrigin, isProduction
 
   return {
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        return callback(null, true)
-      }
+      if (!origin) return callback(null, true)
 
-      if (!isProduction) {
-        return callback(null, true)
-      }
+      // Allow exact matches
+      if (allowedOrigins.includes(origin)) return callback(null, true)
+
+      // Allow GitHub Pages domains (*.github.io)
+      if (origin.endsWith('.github.io')) return callback(null, true)
+
+      // Allow localhost and 127.0.0.1 in development
+      if (!isProduction) return callback(null, true)
 
       return callback(new Error('Origin não permitida pela configuração do backend.'))
     },
@@ -51,3 +54,4 @@ function buildCorsOptions({ frontendOrigin = config.frontendOrigin, isProduction
 }
 
 module.exports = { config, buildCorsOptions }
+
