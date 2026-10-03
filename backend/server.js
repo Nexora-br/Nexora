@@ -34,7 +34,6 @@ app.use((_request, response, next) => {
   next()
 })
 app.use(cors(buildCorsOptions()))
-app.options('*', cors(buildCorsOptions()))
 app.use(express.json({ limit: '2mb' }))
 const requestWindows = new Map()
 function limitRequests({ windowMs, max, message }) {
