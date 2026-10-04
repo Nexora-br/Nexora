@@ -12,6 +12,72 @@ function createFinanceRoutes({ db, auth, requireRole, audit, id }) {
   const router = express.Router()
   const finance = [auth, requireRole(...financeRoles)]
 
+  router.get('/api/finance/dashboard', ...finance, async (request, response) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      const from = validDate(request.query.from) ? request.query.from : `${today.slice(0, 7)}-01`
+      const to = validDate(request.query.to) ? request.query.to : new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) + 3, 0)).toISOString().slice(0, 10)
+      if (from > to) return response.status(400).json({ error: 'O período inicial deve ser anterior ao período final.' })
+      const companyId = request.user.company_id
+      const [settled, openPayables, openReceivables, overdue, dreRows, openingBalance] = await Promise.all([
+        db.all('SELECT transaction_date AS date, type, category, cost_center, SUM(amount) AS amount FROM financial_transactions WHERE company_id = ? AND status = ? AND transaction_date BETWEEN ? AND ? GROUP BY transaction_date, type, category, cost_center ORDER BY transaction_date', [companyId, 'CONFIRMADA', from, to]),
+        db.all(`SELECT a.id, a.description, a.due_date, a.amount, a.discount, a.interest, a.fine, a.category, a.cost_center, COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'PAGAR' AND s.account_id = a.id), 0) AS settled FROM accounts_payable a WHERE a.company_id = ? AND a.status NOT IN ('PAGA', 'CANCELADA') AND a.due_date BETWEEN ? AND ?`, [companyId, from, to]),
+        db.all(`SELECT a.id, a.description, a.due_date, a.amount, a.discount, a.interest, a.fine, a.category, a.revenue_center AS cost_center, COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'RECEBER' AND s.account_id = a.id), 0) AS settled FROM accounts_receivable a WHERE a.company_id = ? AND a.status NOT IN ('RECEBIDA', 'CANCELADA') AND a.due_date BETWEEN ? AND ?`, [companyId, from, to]),
+        db.get(`SELECT COALESCE(SUM(MAX(a.amount + COALESCE(a.interest, 0) + COALESCE(a.fine, 0) - COALESCE(a.discount, 0) - COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'RECEBER' AND s.account_id = a.id), 0), 0)), 0) AS amount, COUNT(*) AS count FROM accounts_receivable a WHERE a.company_id = ? AND a.status NOT IN ('RECEBIDA', 'CANCELADA') AND a.due_date < ?`, [companyId, today]),
+        db.all(`SELECT COALESCE(category, 'Sem categoria') AS category, COALESCE(cost_center, 'Sem centro de custo') AS cost_center, type, SUM(amount) AS amount FROM financial_transactions WHERE company_id = ? AND status = 'CONFIRMADA' AND transaction_date BETWEEN ? AND ? GROUP BY category, cost_center, type ORDER BY type, amount DESC`, [companyId, from, to]),
+        db.get(`SELECT COALESCE(SUM(s.closing_balance), 0) AS amount FROM bank_statements s WHERE s.company_id = ? AND s.status = 'CONCILIADA' AND s.period_end = (SELECT MAX(previous.period_end) FROM bank_statements previous WHERE previous.company_id = s.company_id AND previous.bank_account = s.bank_account AND previous.status = 'CONCILIADA' AND previous.period_end < ?)`, [companyId, from]),
+      ])
+      const actual = settled.reduce((totals, row) => { const amount = Number(row.amount || 0); if (row.type === 'ENTRADA') totals.income += amount; else if (row.type === 'SAIDA') totals.expense += amount; return totals }, { income: 0, expense: 0 })
+      const forecast = [...openReceivables.map((row) => ({ date: row.due_date, type: 'ENTRADA', description: row.description, category: row.category, cost_center: row.cost_center, amount: Math.max(0, Number(row.amount) + Number(row.interest || 0) + Number(row.fine || 0) - Number(row.discount || 0) - Number(row.settled)) })), ...openPayables.map((row) => ({ date: row.due_date, type: 'SAIDA', description: row.description, category: row.category, cost_center: row.cost_center, amount: Math.max(0, Number(row.amount) + Number(row.interest || 0) + Number(row.fine || 0) - Number(row.discount || 0) - Number(row.settled)) }))].filter((row) => row.amount > 0).sort((a, b) => a.date.localeCompare(b.date))
+      const forecastTotals = forecast.reduce((totals, row) => { totals[row.type === 'ENTRADA' ? 'income' : 'expense'] += row.amount; return totals }, { income: 0, expense: 0 })
+      const dre = dreRows.reduce((result, row) => { const key = row.type === 'ENTRADA' ? 'revenue' : 'expenses'; result[key] += Number(row.amount || 0); result.lines.push({ category: row.category, cost_center: row.cost_center, type: row.type, amount: Number(row.amount || 0) }); return result }, { revenue: 0, expenses: 0, lines: [] })
+      const centerType = (value) => /materia|insumo|compra|custo direto|mão de obra|obra|equipamento/i.test(value) ? 'CUSTO' : 'DESPESA'
+      dre.costs = dre.lines.filter((row) => row.type === 'SAIDA' && centerType(`${row.category} ${row.cost_center}`) === 'CUSTO').reduce((sum, row) => sum + row.amount, 0)
+      dre.operatingExpenses = Math.max(0, dre.expenses - dre.costs)
+      dre.profit = dre.revenue - dre.expenses
+      dre.margin = dre.revenue ? dre.profit / dre.revenue * 100 : 0
+      const openingCash = Number(openingBalance?.amount || 0)
+      response.json({ period: { from, to, today }, openingBalance: openingCash, actual: { ...actual, balance: openingCash + actual.income - actual.expense, net: actual.income - actual.expense, entries: settled }, forecast: { ...forecastTotals, balance: openingCash + actual.income - actual.expense + forecastTotals.income - forecastTotals.expense, entries: forecast }, overdueReceivables: { amount: Number(overdue?.amount || 0), count: Number(overdue?.count || 0) }, dre })
+    } catch (error) { console.error('Finance dashboard:', error); response.status(500).json({ error: 'Não foi possível montar o painel financeiro.' }) }
+  })
+
+  router.post('/api/finance/accounts', ...finance, async (request, response) => {
+    try {
+      const body = request.body || {}
+      const type = body.account_type
+      const payable = type === 'PAGAR'
+      if (!payable && type !== 'RECEBER') return response.status(400).json({ error: 'Selecione contas a pagar ou a receber.' })
+      const table = payable ? 'accounts_payable' : 'accounts_receivable'
+      const amount = roundMoney(body.amount)
+      if (!String(body.description || '').trim() || !validDate(body.due_date) || !Number.isFinite(amount) || amount <= 0) return response.status(400).json({ error: 'Descrição, vencimento válido e valor maior que zero são obrigatórios.' })
+      const recurrence = ['MENSAL', 'SEMANAL', 'ANUAL'].includes(body.recurrence) ? body.recurrence : ''
+      const count = Math.max(1, Math.min(36, Number.parseInt(recurrence ? body.recurrence_count : body.installment_count, 10) || 1))
+      const seriesId = count > 1 ? id() : null
+      const fields = payable
+        ? ['id', 'company_id', 'supplier_id', 'project_id', 'category', 'cost_center', 'description', 'document_number', 'issue_date', 'competence', 'due_date', 'amount', 'discount', 'interest', 'fine', 'payment_method', 'bank_account', 'observations', 'series_id', 'installment_number', 'installment_count', 'recurrence']
+        : ['id', 'company_id', 'client_id', 'project_id', 'category', 'revenue_center', 'description', 'document_number', 'issue_date', 'competence', 'due_date', 'amount', 'discount', 'interest', 'fine', 'payment_method', 'bank_account', 'observations', 'series_id', 'installment_number', 'installment_count', 'recurrence']
+      const records = []
+      await db.transaction(async () => {
+        for (let index = 0; index < count; index += 1) {
+          const due = new Date(`${body.due_date}T00:00:00.000Z`)
+          if (recurrence === 'SEMANAL') due.setUTCDate(due.getUTCDate() + 7 * index)
+          if (recurrence === 'ANUAL') due.setUTCFullYear(due.getUTCFullYear() + index)
+          if (recurrence === 'MENSAL') { const day = due.getUTCDate(); due.setUTCDate(1); due.setUTCMonth(due.getUTCMonth() + index); due.setUTCDate(Math.min(day, new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth() + 1, 0)).getUTCDate())) }
+          const installmentValue = roundMoney(amount / count)
+          const partAmount = !recurrence && count > 1 && index === count - 1 ? roundMoney(amount - installmentValue * (count - 1)) : !recurrence && count > 1 ? installmentValue : amount
+          const description = count > 1 ? `${String(body.description).trim()} (${recurrence ? 'recorrência' : 'parcela'} ${index + 1}/${count})` : String(body.description).trim()
+          const values = payable
+            ? [id(), request.user.company_id, body.supplier_id || null, body.project_id || null, body.category || null, body.cost_center || null, description, body.document_number || null, body.issue_date || null, body.competence || null, due.toISOString().slice(0, 10), partAmount, Number(body.discount || 0), Number(body.interest || 0), Number(body.fine || 0), body.payment_method || null, body.bank_account || null, body.observations || null, seriesId, index + 1, count, recurrence || null]
+            : [id(), request.user.company_id, body.client_id || null, body.project_id || null, body.category || null, body.revenue_center || null, description, body.document_number || null, body.issue_date || null, body.competence || null, due.toISOString().slice(0, 10), partAmount, Number(body.discount || 0), Number(body.interest || 0), Number(body.fine || 0), body.payment_method || null, body.bank_account || null, body.observations || null, seriesId, index + 1, count, recurrence || null]
+          await db.run(`INSERT INTO ${table} (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`, values)
+          records.push(await db.get(`SELECT * FROM ${table} WHERE id = ? AND company_id = ?`, [values[0], request.user.company_id]))
+        }
+      })
+      for (const record of records) await audit(request.user, 'CRIAR', payable ? 'ACCOUNTS-PAYABLE' : 'ACCOUNTS-RECEIVABLE', record.id, null, record)
+      response.status(201).json({ accounts: records, series_id: seriesId })
+    } catch (error) { console.error('Finance account series:', error); response.status(500).json({ error: 'Não foi possível criar as contas financeiras.' }) }
+  })
+
   router.get('/api/finance/settlements', ...finance, async (request, response) => {
     try {
       const where = ['s.company_id = ?']
@@ -35,18 +101,21 @@ function createFinanceRoutes({ db, auth, requireRole, audit, id }) {
       const table = accountType === 'PAGAR' ? 'accounts_payable' : 'accounts_receivable'
       const account = await db.get(`SELECT * FROM ${table} WHERE id = ? AND company_id = ?`, [accountId, request.user.company_id])
       if (!account) return response.status(404).json({ error: 'Lançamento financeiro não encontrado.' })
+      const proofDocumentId = request.body?.proof_document_id || null
+      if (proofDocumentId && !await db.get('SELECT id FROM documents WHERE id = ? AND company_id = ? AND related_entity = ? AND related_id = ?', [proofDocumentId, request.user.company_id, 'FINANCIAL_ACCOUNT', accountId])) return response.status(400).json({ error: 'O comprovante enviado não pertence a esta conta.' })
       const previous = await db.get('SELECT COALESCE(SUM(amount), 0) AS settled FROM account_settlements WHERE company_id = ? AND account_type = ? AND account_id = ?', [request.user.company_id, accountType, accountId])
-      const remaining = roundMoney(Number(account.amount) - Number(previous?.settled || 0))
+      const totalDue = roundMoney(Number(account.amount) + Number(account.interest || 0) + Number(account.fine || 0) - Number(account.discount || 0))
+      const remaining = roundMoney(totalDue - Number(previous?.settled || 0))
       if (amount > remaining + 0.01) return response.status(400).json({ error: `O valor excede o saldo em aberto de R$ ${remaining.toFixed(2)}.` })
       const settlementId = id()
       const transactionId = id()
       const flowType = accountType === 'PAGAR' ? 'SAIDA' : 'ENTRADA'
       const transactionDate = settlementDate
       await db.transaction(async () => {
-        await db.run('INSERT INTO financial_transactions (id, company_id, project_id, user_id, description, category, cost_center, amount, type, status, transaction_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [transactionId, request.user.company_id, account.project_id || null, request.user.id, `${accountType === 'PAGAR' ? 'Pagamento' : 'Recebimento'}: ${account.description}`, account.category || (accountType === 'PAGAR' ? 'CONTAS_A_PAGAR' : 'CONTAS_A_RECEBER'), account.cost_center || null, amount, flowType, 'CONFIRMADA', transactionDate])
-        await db.run('INSERT INTO account_settlements (id, company_id, account_type, account_id, amount, settlement_date, payment_method, bank_account, reference, notes, transaction_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [settlementId, request.user.company_id, accountType, accountId, amount, settlementDate, request.body.payment_method || null, request.body.bank_account || null, request.body.reference || null, request.body.notes || null, transactionId, request.user.id])
+        await db.run('INSERT INTO financial_transactions (id, company_id, project_id, user_id, description, category, cost_center, amount, type, status, transaction_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [transactionId, request.user.company_id, account.project_id || null, request.user.id, `${accountType === 'PAGAR' ? 'Pagamento' : 'Recebimento'}: ${account.description}`, account.category || (accountType === 'PAGAR' ? 'CONTAS_A_PAGAR' : 'CONTAS_A_RECEBER'), account.cost_center || account.revenue_center || null, amount, flowType, 'CONFIRMADA', transactionDate])
+        await db.run('INSERT INTO account_settlements (id, company_id, account_type, account_id, amount, settlement_date, payment_method, bank_account, reference, notes, proof_document_id, transaction_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [settlementId, request.user.company_id, accountType, accountId, amount, settlementDate, request.body.payment_method || null, request.body.bank_account || null, request.body.reference || null, request.body.notes || null, proofDocumentId, transactionId, request.user.id])
         const settledTotal = roundMoney(Number(previous?.settled || 0) + amount)
-        const status = settledTotal >= Number(account.amount) - 0.01 ? (accountType === 'PAGAR' ? 'PAGA' : 'RECEBIDA') : 'PARCIAL'
+        const status = settledTotal >= totalDue - 0.01 ? (accountType === 'PAGAR' ? 'PAGA' : 'RECEBIDA') : 'PARCIAL'
         await db.run(`UPDATE ${table} SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?`, [status, accountId, request.user.company_id])
       })
       const settlement = await db.get('SELECT * FROM account_settlements WHERE id = ? AND company_id = ?', [settlementId, request.user.company_id])
