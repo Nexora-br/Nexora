@@ -45,7 +45,7 @@ const menuGroups = [
     { label: 'Nexora AI', icon: Bot },
   ] },
 ]
-const financeMenuItems = [['visao', 'Painel financeiro'], ['fluxo', 'Fluxo de caixa'], ['dre', 'DRE gerencial'], ['centros', 'Centros de custo'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['baixas', 'Baixas'], ['conciliacao', 'Conciliação'], ['relatorios', 'Relatórios']]
+const financeMenuItems = [['visao', 'Painel financeiro'], ['dre', 'DRE gerencial'], ['centros', 'Obras / custos'], ['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['baixas', 'Baixas'], ['conciliacao', 'Conciliação'], ['relatorios', 'Relatórios']]
 const iconComponents = { Factory, Truck, Warehouse, ClipboardList, LayoutDashboard, Package, CalendarDays, Users, UsersRound, Wrench, Handshake, ReceiptText, FileText, ShoppingCart, WalletCards, BarChart3, Bot, Bell }
 const rowsFrom = (result) => {
   if (Array.isArray(result)) return result
@@ -210,7 +210,7 @@ function AppNew() {
 
   // Loaders are declared below; keeping this effect before the auth return preserves hook order.
   // eslint-disable-next-line react/immutability, react-hooks/exhaustive-deps
-  useEffect(() => { if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined; const params = query.trim() ? { search: query.trim(), page: 1 } : { page: 1 }; if (activeMenu === 'Projetos e obras') loadProjects(params); if (activeMenu === 'Clientes') loadClients(params); if (activeMenu === 'Estoque') loadStock(params); if (activeMenu === 'Fornecedores') loadSuppliers(params); if (activeMenu === 'Compras') { loadPurchaseRequests(params); void loadQuotations(params) } if (activeMenu === 'Financeiro') { loadPayables(params); loadReceivables(params) } if (activeMenu === 'Equipamentos') { loadEquipments(params); loadMaintenances(params) } if (activeMenu === 'Agenda de campo') loadAgenda(params); if (activeMenu === 'Documentos') loadDocuments({ ...params, scope: 'company' }); if (activeMenu === 'Contratos') loadDocuments({ ...params, scope: 'contracts' }); return undefined }, [activeMenu, query, session?.token, billingGate, billingUiEnabled])
+  useEffect(() => { if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined; const params = query.trim() ? { search: query.trim(), page: 1 } : { page: 1 }; if (activeMenu === 'Projetos e obras') loadProjects(params); if (activeMenu === 'Clientes') loadClients(params); if (activeMenu === 'Estoque') loadStock(params); if (activeMenu === 'Fornecedores') loadSuppliers(params); if (activeMenu === 'Compras') { loadPurchaseRequests(params); void loadQuotations(params) } if (activeMenu === 'Financeiro') { loadProjects({ page: 1, pageSize: 100 }); loadPayables(params); loadReceivables(params) } if (activeMenu === 'Equipamentos') { loadEquipments(params); loadMaintenances(params) } if (activeMenu === 'Agenda de campo') loadAgenda(params); if (activeMenu === 'Documentos') loadDocuments({ ...params, scope: 'company' }); if (activeMenu === 'Contratos') loadDocuments({ ...params, scope: 'contracts' }); return undefined }, [activeMenu, query, session?.token, billingGate, billingUiEnabled])
 
   async function handleLogin(event) {
     event.preventDefault()

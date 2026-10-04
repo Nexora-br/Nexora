@@ -19,15 +19,16 @@ function createFinanceRoutes({ db, auth, requireRole, audit, id }) {
       const to = validDate(request.query.to) ? request.query.to : new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) + 3, 0)).toISOString().slice(0, 10)
       if (from > to) return response.status(400).json({ error: 'O período inicial deve ser anterior ao período final.' })
       const companyId = request.user.company_id
-      const [settled, openPayables, openReceivables, overdue, dreRows, openingBalance] = await Promise.all([
+      const [settled, openPayables, openReceivables, overdueRows, dreRows, openingBalance] = await Promise.all([
         db.all('SELECT transaction_date AS date, type, category, cost_center, SUM(amount) AS amount FROM financial_transactions WHERE company_id = ? AND status = ? AND transaction_date BETWEEN ? AND ? GROUP BY transaction_date, type, category, cost_center ORDER BY transaction_date', [companyId, 'CONFIRMADA', from, to]),
         db.all(`SELECT a.id, a.description, a.due_date, a.amount, a.discount, a.interest, a.fine, a.category, a.cost_center, COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'PAGAR' AND s.account_id = a.id), 0) AS settled FROM accounts_payable a WHERE a.company_id = ? AND a.status NOT IN ('PAGA', 'CANCELADA') AND a.due_date BETWEEN ? AND ?`, [companyId, from, to]),
         db.all(`SELECT a.id, a.description, a.due_date, a.amount, a.discount, a.interest, a.fine, a.category, a.revenue_center AS cost_center, COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'RECEBER' AND s.account_id = a.id), 0) AS settled FROM accounts_receivable a WHERE a.company_id = ? AND a.status NOT IN ('RECEBIDA', 'CANCELADA') AND a.due_date BETWEEN ? AND ?`, [companyId, from, to]),
-        db.get(`SELECT COALESCE(SUM(MAX(a.amount + COALESCE(a.interest, 0) + COALESCE(a.fine, 0) - COALESCE(a.discount, 0) - COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'RECEBER' AND s.account_id = a.id), 0), 0)), 0) AS amount, COUNT(*) AS count FROM accounts_receivable a WHERE a.company_id = ? AND a.status NOT IN ('RECEBIDA', 'CANCELADA') AND a.due_date < ?`, [companyId, today]),
+        db.all(`SELECT a.amount, a.interest, a.fine, a.discount, COALESCE((SELECT SUM(s.amount) FROM account_settlements s WHERE s.company_id = a.company_id AND s.account_type = 'RECEBER' AND s.account_id = a.id), 0) AS settled FROM accounts_receivable a WHERE a.company_id = ? AND a.status NOT IN ('RECEBIDA', 'CANCELADA') AND a.due_date < ?`, [companyId, today]),
         db.all(`SELECT COALESCE(category, 'Sem categoria') AS category, COALESCE(cost_center, 'Sem centro de custo') AS cost_center, type, SUM(amount) AS amount FROM financial_transactions WHERE company_id = ? AND status = 'CONFIRMADA' AND transaction_date BETWEEN ? AND ? GROUP BY category, cost_center, type ORDER BY type, amount DESC`, [companyId, from, to]),
         db.get(`SELECT COALESCE(SUM(s.closing_balance), 0) AS amount FROM bank_statements s WHERE s.company_id = ? AND s.status = 'CONCILIADA' AND s.period_end = (SELECT MAX(previous.period_end) FROM bank_statements previous WHERE previous.company_id = s.company_id AND previous.bank_account = s.bank_account AND previous.status = 'CONCILIADA' AND previous.period_end < ?)`, [companyId, from]),
       ])
       const actual = settled.reduce((totals, row) => { const amount = Number(row.amount || 0); if (row.type === 'ENTRADA') totals.income += amount; else if (row.type === 'SAIDA') totals.expense += amount; return totals }, { income: 0, expense: 0 })
+      const overdue = overdueRows.reduce((result, row) => { const open = Math.max(0, Number(row.amount || 0) + Number(row.interest || 0) + Number(row.fine || 0) - Number(row.discount || 0) - Number(row.settled || 0)); if (open > 0) { result.amount += open; result.count += 1 } return result }, { amount: 0, count: 0 })
       const forecast = [...openReceivables.map((row) => ({ date: row.due_date, type: 'ENTRADA', description: row.description, category: row.category, cost_center: row.cost_center, amount: Math.max(0, Number(row.amount) + Number(row.interest || 0) + Number(row.fine || 0) - Number(row.discount || 0) - Number(row.settled)) })), ...openPayables.map((row) => ({ date: row.due_date, type: 'SAIDA', description: row.description, category: row.category, cost_center: row.cost_center, amount: Math.max(0, Number(row.amount) + Number(row.interest || 0) + Number(row.fine || 0) - Number(row.discount || 0) - Number(row.settled)) }))].filter((row) => row.amount > 0).sort((a, b) => a.date.localeCompare(b.date))
       const forecastTotals = forecast.reduce((totals, row) => { totals[row.type === 'ENTRADA' ? 'income' : 'expense'] += row.amount; return totals }, { income: 0, expense: 0 })
       const dre = dreRows.reduce((result, row) => { const key = row.type === 'ENTRADA' ? 'revenue' : 'expenses'; result[key] += Number(row.amount || 0); result.lines.push({ category: row.category, cost_center: row.cost_center, type: row.type, amount: Number(row.amount || 0) }); return result }, { revenue: 0, expenses: 0, lines: [] })
@@ -37,8 +38,29 @@ function createFinanceRoutes({ db, auth, requireRole, audit, id }) {
       dre.profit = dre.revenue - dre.expenses
       dre.margin = dre.revenue ? dre.profit / dre.revenue * 100 : 0
       const openingCash = Number(openingBalance?.amount || 0)
-      response.json({ period: { from, to, today }, openingBalance: openingCash, actual: { ...actual, balance: openingCash + actual.income - actual.expense, net: actual.income - actual.expense, entries: settled }, forecast: { ...forecastTotals, balance: openingCash + actual.income - actual.expense + forecastTotals.income - forecastTotals.expense, entries: forecast }, overdueReceivables: { amount: Number(overdue?.amount || 0), count: Number(overdue?.count || 0) }, dre })
+      response.json({ period: { from, to, today }, openingBalance: openingCash, actual: { ...actual, balance: openingCash + actual.income - actual.expense, net: actual.income - actual.expense, entries: settled }, forecast: { ...forecastTotals, balance: openingCash + actual.income - actual.expense + forecastTotals.income - forecastTotals.expense, entries: forecast }, overdueReceivables: overdue, dre })
     } catch (error) { console.error('Finance dashboard:', error); response.status(500).json({ error: 'Não foi possível montar o painel financeiro.' }) }
+  })
+
+  router.get('/api/finance/project-dre', ...finance, async (request, response) => {
+    try {
+      const { project_id: projectId } = request.query
+      const today = new Date().toISOString().slice(0, 10)
+      const from = validDate(request.query.from) ? request.query.from : `${today.slice(0, 4)}-01-01`
+      const to = validDate(request.query.to) ? request.query.to : today
+      if (!projectId) return response.status(400).json({ error: 'Selecione uma obra para consultar o DRE.' })
+      if (from > to) return response.status(400).json({ error: 'O período inicial deve ser anterior ao período final.' })
+      const project = await db.get('SELECT id, name, contracted_value, expected_cost FROM projects WHERE id = ? AND company_id = ?', [projectId, request.user.company_id])
+      if (!project) return response.status(404).json({ error: 'A obra selecionada não foi encontrada.' })
+      const rows = await db.all("SELECT COALESCE(category, 'Sem categoria') AS category, COALESCE(cost_center, 'Sem centro de custo') AS cost_center, type, SUM(amount) AS amount FROM financial_transactions WHERE company_id = ? AND project_id = ? AND status = 'CONFIRMADA' AND transaction_date BETWEEN ? AND ? GROUP BY category, cost_center, type ORDER BY type, amount DESC", [request.user.company_id, projectId, from, to])
+      const dre = rows.reduce((result, row) => { const amount = Number(row.amount || 0); if (row.type === 'ENTRADA') result.revenue += amount; else { result.expenses += amount; if (/materia|insumo|compra|custo direto|mão de obra|obra|equipamento/i.test(`${row.category} ${row.cost_center}`)) result.costs += amount; else result.operatingExpenses += amount } result.lines.push({ category: row.category, cost_center: row.cost_center, type: row.type, amount }); return result }, { revenue: 0, expenses: 0, costs: 0, operatingExpenses: 0, lines: [] })
+      dre.profit = dre.revenue - dre.expenses
+      dre.margin = dre.revenue ? dre.profit / dre.revenue * 100 : 0
+      const grouped = new Map()
+      for (const row of dre.lines.filter((item) => item.type === 'SAIDA')) grouped.set(row.category, (grouped.get(row.category) || 0) + row.amount)
+      const categories = [...grouped].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount)
+      response.json({ project, period: { from, to }, dre, categories })
+    } catch (error) { console.error('Finance project DRE:', error); response.status(500).json({ error: 'Não foi possível montar o DRE da obra.' }) }
   })
 
   router.post('/api/finance/accounts', ...finance, async (request, response) => {
