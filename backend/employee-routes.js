@@ -88,7 +88,7 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       if (status !== 'TODOS') { where.push('e.status = ?'); params.push(status === 'DEMITIDO' ? 'DEMITIDO' : 'ATIVO') }
       const search = String(request.query.search || '').trim()
       if (search) { where.push('(e.name LIKE ? OR e.document LIKE ? OR e.job_title LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
-      const employees = await db.all(`SELECT e.*, u.name AS linked_user_name, (SELECT COUNT(*) FROM employee_documents d WHERE d.employee_id = e.id AND d.company_id = e.company_id) AS document_count FROM employees e LEFT JOIN users u ON u.id = e.user_id AND u.company_id = e.company_id WHERE ${where.join(' AND ')} ORDER BY CASE WHEN e.status = 'ATIVO' THEN 0 ELSE 1 END, e.name ASC`, params)
+      const employees = await db.all(`SELECT e.*, u.name AS linked_user_name, ((SELECT COUNT(*) FROM employee_documents d WHERE d.employee_id = e.id AND d.company_id = e.company_id) + (SELECT COUNT(*) FROM safety_certificates c WHERE c.employee_id = e.id AND c.company_id = e.company_id)) AS document_count FROM employees e LEFT JOIN users u ON u.id = e.user_id AND u.company_id = e.company_id WHERE ${where.join(' AND ')} ORDER BY CASE WHEN e.status = 'ATIVO' THEN 0 ELSE 1 END, e.name ASC`, params)
       response.json(employees)
     } catch { response.status(500).json({ error: 'Não foi possível carregar os funcionários.' }) }
   })
@@ -115,12 +115,21 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
     try {
       const record = await employee(request.params.id, request.user.company_id)
       if (!record) return response.status(404).json({ error: 'Funcionário não encontrado.' })
-      const [documents, employmentHistory, folders] = await Promise.all([
+      const certificateCount = await db.get('SELECT COUNT(*) AS total FROM safety_certificates WHERE employee_id = ? AND company_id = ?', [record.id, request.user.company_id])
+      if (Number(certificateCount?.total || 0) > 0) {
+        let certificateFolder = await db.get('SELECT id FROM employee_document_folders WHERE employee_id = ? AND company_id = ? AND name = ? AND parent_id IS NULL', [record.id, request.user.company_id, 'Certificados'])
+        if (!certificateFolder) { const folderId = crypto.randomUUID(); await db.run('INSERT INTO employee_document_folders (id, company_id, employee_id, parent_id, name) VALUES (?, ?, ?, NULL, ?)', [folderId, request.user.company_id, record.id, 'Certificados']); certificateFolder = { id: folderId } }
+        await db.run('UPDATE safety_certificates SET folder_id = ? WHERE employee_id = ? AND company_id = ? AND folder_id IS NULL', [certificateFolder.id, record.id, request.user.company_id])
+      }
+      const [documents, employmentHistory, folders, certificates] = await Promise.all([
         db.all('SELECT * FROM employee_documents WHERE employee_id = ? AND company_id = ? ORDER BY created_at DESC', [record.id, request.user.company_id]),
         db.all('SELECT * FROM employee_employment_history WHERE employee_id = ? AND company_id = ? ORDER BY start_date DESC, created_at DESC', [record.id, request.user.company_id]),
         db.all('SELECT * FROM employee_document_folders WHERE employee_id = ? AND company_id = ? ORDER BY name ASC', [record.id, request.user.company_id]),
+        db.all('SELECT id, nr_code, course_name, workload_hours, issue_date, expires_at, folder_id, created_at FROM safety_certificates WHERE employee_id = ? AND company_id = ? ORDER BY issue_date DESC, created_at DESC', [record.id, request.user.company_id]),
       ])
-      response.json({ ...record, documents: documents.map(publicDocument), employment_history: employmentHistory, folders })
+      const employeeDocuments = documents.map(publicDocument)
+      const certificateDocuments = certificates.map((certificate) => ({ id: `certificate-${certificate.id}`, safety_certificate_id: certificate.id, category: 'CERTIFICADO', name: `${certificate.nr_code} - ${certificate.course_name}.pdf`, file_size: 0, mime_type: 'application/pdf', issue_date: certificate.issue_date, expires_at: certificate.expires_at, folder_id: certificate.folder_id, created_at: certificate.created_at }))
+      response.json({ ...record, documents: [...employeeDocuments, ...certificateDocuments], employment_history: employmentHistory, folders })
     } catch { response.status(500).json({ error: 'Não foi possível carregar o cadastro do funcionário.' }) }
   })
 

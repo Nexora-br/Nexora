@@ -19,6 +19,7 @@ const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && 
 function createSafetyRoutes({ db, auth, requirePermission, audit }) {
   const router = express.Router()
   const permission = (action) => [auth, requirePermission('safety_certificates', action)]
+  const canDownloadEmployeeCertificate = (request, response, next) => { const permissions = request.user.permissions || []; if (request.user.role === 'ADMINISTRADOR' || permissions.includes('*.*') || permissions.includes('safety_certificates.export') || permissions.includes('employees.download')) return next(); return response.status(403).json({ error: 'Você não tem permissão para baixar este certificado.' }) }
 
   router.get('/api/safety/employees', ...permission('view'), async (request, response) => {
     try {
@@ -56,9 +57,11 @@ function createSafetyRoutes({ db, auth, requirePermission, audit }) {
     try {
       const created = []
       await db.transaction(async () => {
+        let certificateFolder = await db.get('SELECT id FROM employee_document_folders WHERE employee_id = ? AND company_id = ? AND name = ? AND parent_id IS NULL', [employee.id, request.user.company_id, 'Certificados'])
+        if (!certificateFolder) { const folderId = require('crypto').randomUUID(); await db.run('INSERT INTO employee_document_folders (id, company_id, employee_id, parent_id, name, created_by) VALUES (?, ?, ?, NULL, ?, ?)', [folderId, request.user.company_id, employee.id, 'Certificados', request.user.id]); certificateFolder = { id: folderId } }
         for (const item of items) {
           const id = require('crypto').randomUUID()
-          await db.run('INSERT INTO safety_certificates (id, company_id, employee_id, nr_code, course_name, workload_hours, issue_date, expires_at, instructor_name, instructor_registration, content, issued_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, request.user.company_id, employee.id, item.nrCode, item.courseName, item.hours, issueDate, expiresAt, instructorName, instructorRegistration, item.content, request.user.id])
+          await db.run('INSERT INTO safety_certificates (id, company_id, employee_id, nr_code, course_name, workload_hours, issue_date, expires_at, instructor_name, instructor_registration, content, issued_by, folder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, request.user.company_id, employee.id, item.nrCode, item.courseName, item.hours, issueDate, expiresAt, instructorName, instructorRegistration, item.content, request.user.id, certificateFolder.id])
           created.push(await db.get('SELECT c.*, e.name AS employee_name, e.document AS employee_document FROM safety_certificates c JOIN employees e ON e.id = c.employee_id AND e.company_id = c.company_id WHERE c.id = ? AND c.company_id = ?', [id, request.user.company_id]))
         }
       })
@@ -67,7 +70,7 @@ function createSafetyRoutes({ db, auth, requirePermission, audit }) {
     } catch (error) { console.error(error); response.status(500).json({ error: 'Não foi possível emitir os certificados.' }) }
   })
 
-  router.get('/api/safety/certificates/:id/download', ...permission('export'), async (request, response) => {
+  router.get('/api/safety/certificates/:id/download', auth, canDownloadEmployeeCertificate, async (request, response) => {
     try {
       const certificate = await db.get('SELECT c.*, e.name AS employee_name, e.document AS employee_document, co.name AS company_name FROM safety_certificates c JOIN employees e ON e.id = c.employee_id AND e.company_id = c.company_id JOIN companies co ON co.id = c.company_id WHERE c.id = ? AND c.company_id = ?', [request.params.id, request.user.company_id])
       if (!certificate) return response.status(404).json({ error: 'Certificado não encontrado.' })
