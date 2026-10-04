@@ -25,8 +25,8 @@ function parseOfx(text) {
   return { entries: transactions, accountId, periodStart, periodEnd, closing: Number.isFinite(closing) ? closing : null }
 }
 
-export function FinancePage({ payables, receivables, onSettle, onCreate, notify, can, session }) {
-  const [tab, setTab] = useState('pagar')
+export function FinancePage({ activeTab = 'pagar', payables, receivables, onSettle, onCreate, notify, can, session }) {
+  const tab = activeTab
   const [modal, setModal] = useState(null)
   const [statements, setStatements] = useState([])
   const [statement, setStatement] = useState(null)
@@ -113,13 +113,10 @@ export function FinancePage({ payables, receivables, onSettle, onCreate, notify,
   const totalReceivable = receivables.reduce((sum, row) => sum + Number(row.amount || 0), 0)
   const movementTotal = statement?.entries?.reduce((sum, entry) => sum + Number(entry.amount || 0), 0) || 0
   const balanceDifference = statement ? Number(statement.closing_balance) - Number(statement.opening_balance) - movementTotal : 0
-  const tabs = [['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['baixas', 'Baixas'], ['conciliacao', 'Conciliação'], ['relatorios', 'Relatórios']]
 
   return <>
     <FinanceSectionHeading kicker="GESTÃO FINANCEIRA" title="Financeiro" description="Contas, baixas, extratos conciliados e relatórios por período." action={mayCreate && ['pagar', 'receber'].includes(tab) && <button className="blue-button" onClick={() => setModal({ kind: 'account', type: tab })}><Plus size={17} /> {tab === 'pagar' ? 'Nova conta a pagar' : 'Nova conta a receber'}</button>} />
     <div className="metric-grid three"><FinanceMetric icon={WalletCards} label="Total a pagar" value={money(totalPayable)} detail={`${payables.length} lançamentos`} color="amber" /><FinanceMetric icon={ReceiptText} label="Total a receber" value={money(totalReceivable)} detail={`${receivables.length} lançamentos`} color="blue" /><FinanceMetric icon={BarChart3} label="Resultado previsto" value={money(totalReceivable - totalPayable)} detail="Receitas menos compromissos" color="green" /></div>
-    <div className="finance-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</div>
-
     {['pagar', 'receber'].includes(tab) && <div className="page-panel panel"><FinancePanelHeading title={tab === 'pagar' ? 'Contas a pagar' : 'Contas a receber'} subtitle="Lançamentos da empresa atual" /><div className="table-scroll"><table><thead><tr><th>DESCRIÇÃO</th><th>VENCIMENTO</th><th>VALOR</th><th>STATUS</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><b>{account.description}</b><small>{account.document_number || account.document || 'Sem documento'}</small></td><td>{dateLabel(account.due_date)}</td><td>{money(account.amount)}</td><td><em className={`status ${['PAGA', 'RECEBIDA'].includes(account.status) ? 'green' : 'amber'}`}>{account.status === 'PARCIAL' ? 'PARCIAL' : account.status}</em></td><td>{maySettle && !['PAGA', 'RECEBIDA'].includes(account.status) && <button className="table-action" onClick={() => setModal({ kind: 'settlement', type: tab, account })}>{tab === 'pagar' ? 'Dar baixa' : 'Registrar recebimento'}</button>}</td></tr>)}</tbody></table>{!accounts.length && <div className="empty">Nenhum lançamento financeiro cadastrado.</div>}</div></div>}
 
     {tab === 'baixas' && <div className="page-panel panel"><FinancePanelHeading title="Baixas e recebimentos" subtitle="Histórico de pagamentos e recebimentos registrados" action={<button className="outline-button" onClick={() => { const from = `${new Date().getFullYear()}-01-01`; void api(`/finance/settlements?from=${from}&to=${dateNow()}`).then((rows) => { const csv = [['Data', 'Tipo', 'Conta', 'Valor', 'Forma', 'Banco'], ...rows.map((r) => [r.settlement_date, r.account_type, r.account_description, Number(r.amount).toFixed(2), r.payment_method, r.bank_account])]; const blob = new Blob([`\uFEFF${csv.map((line) => line.map(escapeCsv).join(';')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'baixas-financeiras.csv'; a.click(); URL.revokeObjectURL(url) }).catch((error) => notify(error.message)) }}><ArrowDownToLine size={15} /> Exportar baixas</button>} /><SettlementsList session={session} onError={(message) => notify(message)} /></div>}
