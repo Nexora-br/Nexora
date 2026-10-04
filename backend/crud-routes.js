@@ -68,7 +68,44 @@ function createCrudRoutes({ db, auth, requireRole, requirePermission, audit }) {
 
   router.get('/api/purchase-requests/:id/items', auth, async (request, response) => { try { response.json(await db.all('SELECT * FROM purchase_request_items WHERE purchase_request_id = ? AND company_id = ?', [request.params.id, request.user.company_id])) } catch (error) { response.status(500).json({ error: 'Não foi possível listar os itens da solicitação.' }) } })
   router.get('/api/purchase-requests/:id/checklist', auth, async (request, response) => { try { const row = await db.get('SELECT observations FROM purchase_requests WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!row) return response.status(404).json({ error: 'Solicitação não encontrada.' }); let stored = {}; try { stored = JSON.parse(row.observations || '{}') } catch {} response.json({ note: stored.note || '', items: Array.isArray(stored.delivery_checklist) ? stored.delivery_checklist : [] }) } catch { response.status(500).json({ error: 'Não foi possível carregar o checklist.' }) } })
-  router.put('/api/purchase-requests/:id/checklist', auth, requireRole(...supplyRoles), async (request, response) => { const items = Array.isArray(request.body?.items) ? request.body.items : null; if (!items || items.some((item) => !String(item.description || '').trim() || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)) return response.status(400).json({ error: 'Informe os itens e as quantidades válidas do checklist.' }); try { const row = await db.get('SELECT status, observations FROM purchase_requests WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!row) return response.status(404).json({ error: 'Solicitação não encontrada.' }); let stored = {}; try { stored = JSON.parse(row.observations || '{}') } catch { stored = { note: row.observations || '' } } const checklist = items.map((item) => ({ description: String(item.description).trim(), quantity: Number(item.quantity), received_quantity: Math.min(Number(item.received_quantity) || 0, Number(item.quantity)) })); await db.run('UPDATE purchase_requests SET observations = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [JSON.stringify({ note: stored.note || '', delivery_checklist: checklist }), request.params.id, request.user.company_id]); response.json({ items: checklist }) } catch { response.status(500).json({ error: 'Não foi possível salvar o checklist.' }) } })
+  router.put('/api/purchase-requests/:id/checklist', auth, requireRole(...supplyRoles), async (request, response) => {
+    const items = Array.isArray(request.body?.items) ? request.body.items : null
+    if (!items || items.some((item) => !String(item.description || '').trim() || !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0 || !Number.isFinite(Number(item.received_quantity ?? 0)) || Number(item.received_quantity ?? 0) < 0 || Number(item.received_quantity ?? 0) > Number(item.quantity))) return response.status(400).json({ error: 'Informe os itens e as quantidades válidas do checklist.' })
+    try {
+      const row = await db.get('SELECT project_id, observations FROM purchase_requests WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id])
+      if (!row) return response.status(404).json({ error: 'Solicitação não encontrada.' })
+      const project = row.project_id ? await db.get('SELECT id FROM projects WHERE id = ? AND company_id = ?', [row.project_id, request.user.company_id]) : null
+      if (items.some((item) => Number(item.received_quantity || 0) > 0) && !project) return response.status(400).json({ error: 'A solicitação precisa estar vinculada a uma obra para atualizar o estoque.' })
+      let stored = {}
+      try { stored = JSON.parse(row.observations || '{}') } catch { stored = { note: row.observations || '' } }
+      const previousChecklist = Array.isArray(stored.delivery_checklist) ? stored.delivery_checklist : []
+      const checklist = items.map((item) => ({ description: String(item.description).trim(), quantity: Number(item.quantity), received_quantity: Number(item.received_quantity || 0) }))
+      const receivedByDescription = new Map(previousChecklist.map((item) => [String(item.description || '').trim().toLocaleLowerCase('pt-BR'), Number(item.received_quantity || 0)]))
+      await db.transaction(async () => {
+        for (const item of checklist) {
+          const previousReceived = receivedByDescription.get(item.description.toLocaleLowerCase('pt-BR')) || 0
+          const delta = item.received_quantity - previousReceived
+          if (!delta) continue
+          let product = await db.get('SELECT id FROM products WHERE company_id = ? AND archived = 0 AND name = ? COLLATE NOCASE', [request.user.company_id, item.description])
+          if (!product) {
+            product = { id: id() }
+            await db.run('INSERT INTO products (id, company_id, name, unit) VALUES (?, ?, ?, ?)', [product.id, request.user.company_id, item.description, 'UN'])
+          }
+          const stock = await db.get('SELECT * FROM inventory WHERE company_id = ? AND product_id = ? AND project_id = ?', [request.user.company_id, product.id, project.id])
+          const current = Number(stock?.quantity || 0)
+          const next = current + delta
+          if (next < 0) throw Object.assign(new Error(`A quantidade conferida de "${item.description}" não pode ser menor que a já registrada no estoque.`), { status: 409 })
+          if (stock) await db.run('UPDATE inventory SET quantity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [next, stock.id])
+          else await db.run('INSERT INTO inventory (id, company_id, product_id, project_id, quantity) VALUES (?, ?, ?, ?, ?)', [id(), request.user.company_id, product.id, project.id, next])
+          await db.run('INSERT INTO inventory_movements (id, company_id, product_id, project_id, type, quantity, user_id, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [id(), request.user.company_id, product.id, project.id, delta > 0 ? 'ENTRADA' : 'SAIDA', Math.abs(delta), request.user.id, `Conferência do checklist da solicitação ${request.params.id}`])
+        }
+        await db.run('UPDATE purchase_requests SET observations = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [JSON.stringify({ note: stored.note || '', delivery_checklist: checklist }), request.params.id, request.user.company_id])
+      })
+      response.json({ items: checklist })
+    } catch (error) {
+      response.status(error.status || 500).json({ error: error.status ? error.message : 'Não foi possível salvar o checklist.' })
+    }
+  })
   router.post('/api/purchase-requests/:id/items', auth, requireRole(...supplyRoles), async (request, response) => { try { const item = { id: id(), ...request.body }; if (!item.description || !item.quantity) return response.status(400).json({ error: 'Produto e quantidade são obrigatórios.' }); await db.run('INSERT INTO purchase_request_items (id, company_id, purchase_request_id, product_id, description, quantity, unit, needed_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [item.id, request.user.company_id, request.params.id, item.product_id || null, item.description, Number(item.quantity), item.unit || 'UN', item.needed_date || null]); response.status(201).json(item) } catch (error) { response.status(500).json({ error: 'Não foi possível adicionar o item.' }) } })
   router.get('/api/purchase-orders/:id/items', auth, async (request, response) => { try { response.json(await db.all('SELECT * FROM purchase_order_items WHERE purchase_order_id = ? AND company_id = ?', [request.params.id, request.user.company_id])) } catch (error) { response.status(500).json({ error: 'Não foi possível listar os itens da ordem.' }) } })
   router.post('/api/purchase-orders/:id/items', auth, requireRole(...supplyRoles), async (request, response) => { try { const order = await db.get('SELECT id FROM purchase_orders WHERE id = ? AND company_id = ?', [request.params.id, request.user.company_id]); if (!order) return response.status(404).json({ error: 'Ordem de compra não encontrada.' }); if (!request.body.description || !request.body.quantity) return response.status(400).json({ error: 'Descrição e quantidade são obrigatórias.' }); const item = { id: id(), ...request.body }; await db.run('INSERT INTO purchase_order_items (id, company_id, purchase_order_id, product_id, description, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?, ?)', [item.id, request.user.company_id, order.id, item.product_id || null, item.description, Number(item.quantity), Number(item.unit_price || 0)]); response.status(201).json(item) } catch (error) { response.status(500).json({ error: 'Não foi possível adicionar o item à ordem.' }) } })
