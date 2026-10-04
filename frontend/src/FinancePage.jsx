@@ -1,0 +1,145 @@
+import { useEffect, useState } from 'react'
+import { ArrowDownToLine, ArrowRightLeft, BarChart3, Check, FileText, Plus, ReceiptText, RefreshCw, Upload, WalletCards, X } from 'lucide-react'
+import { API_URL } from './apiConfig'
+
+const money = (value) => `R$ ${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const dateNow = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+const dateLabel = (value) => value ? new Date(`${String(value).slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR') : '—'
+const escapeCsv = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`
+
+function parseOfx(text) {
+  const tag = (source, name) => source.match(new RegExp(`<${name}>([^<\\r\\n]+)`, 'i'))?.[1]?.trim() || ''
+  const transactions = [...text.matchAll(/<STMTTRN>([\s\S]*?)(?=<STMTTRN>|<\/BANKTRANLIST>|$)/gi)].map(([, block]) => {
+    const posted = tag(block, 'DTPOSTED').slice(0, 8)
+    const rawAmount = Number(tag(block, 'TRNAMT').replace(',', '.'))
+    const date = posted.length === 8 ? `${posted.slice(0, 4)}-${posted.slice(4, 6)}-${posted.slice(6, 8)}` : ''
+    return { date, amount: rawAmount, external_id: tag(block, 'FITID'), description: tag(block, 'MEMO') || tag(block, 'NAME') || tag(block, 'TRNTYPE') }
+  }).filter((entry) => entry.date && Number.isFinite(entry.amount) && entry.amount !== 0 && entry.description)
+  const accountId = tag(text, 'ACCTID')
+  const start = tag(text, 'DTSTART').slice(0, 8)
+  const end = tag(text, 'DTEND').slice(0, 8)
+  const balanceBlock = text.match(/<LEDGERBAL>([\s\S]*?)<\/LEDGERBAL>/i)?.[1] || text
+  const closing = Number(tag(balanceBlock, 'BALAMT').replace(',', '.'))
+  const periodStart = start.length === 8 ? `${start.slice(0, 4)}-${start.slice(4, 6)}-${start.slice(6, 8)}` : transactions.map((item) => item.date).sort()[0] || ''
+  const periodEnd = end.length === 8 ? `${end.slice(0, 4)}-${end.slice(4, 6)}-${end.slice(6, 8)}` : transactions.map((item) => item.date).sort().at(-1) || ''
+  return { entries: transactions, accountId, periodStart, periodEnd, closing: Number.isFinite(closing) ? closing : null }
+}
+
+export function FinancePage({ payables, receivables, onSettle, onCreate, notify, can, session }) {
+  const [tab, setTab] = useState('pagar')
+  const [modal, setModal] = useState(null)
+  const [statements, setStatements] = useState([])
+  const [statement, setStatement] = useState(null)
+  const [candidates, setCandidates] = useState([])
+  const [candidateEntry, setCandidateEntry] = useState(null)
+  const [report, setReport] = useState(null)
+  const [reportRange, setReportRange] = useState({ from: `${new Date().getFullYear()}-01-01`, to: dateNow() })
+  const [busy, setBusy] = useState(false)
+  const [ofxFile, setOfxFile] = useState(null)
+  const [ofxDetails, setOfxDetails] = useState(null)
+  const headers = { Authorization: `Bearer ${session.token}` }
+  const mayCreate = can('finance', 'create')
+  const maySettle = can('finance', 'pay') || can('finance', 'receive')
+
+  async function api(path, options = {}) {
+    const response = await fetch(`${API_URL}${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.error || 'Não foi possível concluir a operação financeira.')
+    return payload
+  }
+  async function loadStatements() { try { setStatements(await api('/finance/statements')) } catch (error) { notify(error.message) } }
+  useEffect(() => { void loadStatements() }, [session.token])
+
+  async function openStatement(id) { try { setStatement(await api(`/finance/statements/${id}`)); setCandidateEntry(null) } catch (error) { notify(error.message) } }
+  async function importStatement(event) {
+    event.preventDefault()
+    if (!ofxFile || !ofxDetails) return notify('Selecione um extrato OFX válido.')
+    const form = new FormData(event.currentTarget)
+    const values = Object.fromEntries(form.entries())
+    const opening = Number(values.opening_balance)
+    const closing = Number(values.closing_balance)
+    if (!values.bank_account || !values.period_start || !values.period_end || !Number.isFinite(opening) || !Number.isFinite(closing)) return notify('Confira conta, período e saldos do extrato.')
+    setBusy(true)
+    try {
+      const result = await api('/finance/statements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ source: 'OFX', bank_account: values.bank_account, period_start: values.period_start, period_end: values.period_end, opening_balance: opening, closing_balance: closing, entries: ofxDetails.entries }) })
+      notify(`Extrato importado: ${result.imported} movimento(s)${result.duplicates ? ` · ${result.duplicates} duplicado(s) ignorado(s)` : ''}.`)
+      setModal(null); setOfxFile(null); setOfxDetails(null); await loadStatements(); await openStatement(result.id)
+    } catch (error) { notify(error.message) } finally { setBusy(false) }
+  }
+  async function createManualStatement(event) {
+    event.preventDefault()
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries())
+    setBusy(true)
+    try {
+      const result = await api('/finance/statements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, source: 'MANUAL', opening_balance: Number(data.opening_balance), closing_balance: Number(data.closing_balance), entries: [] }) })
+      notify('Extrato manual criado. Inclua as movimentações para iniciar a conciliação.')
+      setModal(null); await loadStatements(); await openStatement(result.id)
+    } catch (error) { notify(error.message) } finally { setBusy(false) }
+  }
+  async function addManualEntry(event) {
+    event.preventDefault()
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries())
+    try { await api(`/finance/statements/${statement.id}/entries`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...data, amount: Number(data.amount) }) }); await openStatement(statement.id); notify('Movimentação adicionada ao extrato.') }
+    catch (error) { notify(error.message) }
+  }
+  async function findCandidates(entry) {
+    try { setCandidates(await api(`/finance/statements/${statement.id}/candidates/${entry.id}`)); setCandidateEntry(entry.id) }
+    catch (error) { notify(error.message) }
+  }
+  async function reconcile(entry, transactionId, create = false) {
+    try {
+      await api(`/finance/statements/${statement.id}/entries/${entry.id}/reconcile`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(create ? { create_transaction: true } : { transaction_id: transactionId }) })
+      setCandidateEntry(null); await openStatement(statement.id); notify('Movimentação conciliada.')
+    } catch (error) { notify(error.message) }
+  }
+  async function closeStatement() {
+    try { await api(`/finance/statements/${statement.id}/close`, { method: 'POST' }); await loadStatements(); await openStatement(statement.id); notify('Extrato conciliado e fechado.') }
+    catch (error) { notify(error.message) }
+  }
+  async function generateReport(event) {
+    event.preventDefault()
+    try { setReport(await api(`/finance/reports/reconciled?${new URLSearchParams(reportRange)}`)) }
+    catch (error) { setReport(null); notify(error.message) }
+  }
+  function downloadReport() {
+    if (!report) return
+    const rows = [['Data', 'Conta bancária', 'Descrição do extrato', 'Tipo', 'Valor', 'Lançamento relacionado'], ...report.entries.map((entry) => [entry.entry_date, entry.bank_account, entry.description, Number(entry.amount) < 0 ? 'Saída' : 'Entrada', Number(entry.amount).toFixed(2), entry.transaction_description || ''])]
+    const blob = new Blob([`\uFEFF${rows.map((row) => row.map(escapeCsv).join(';')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `financeiro-conciliado-${report.from}-${report.to}.csv`; anchor.click(); URL.revokeObjectURL(url)
+  }
+
+  const accounts = tab === 'pagar' ? payables : receivables
+  const totalPayable = payables.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+  const totalReceivable = receivables.reduce((sum, row) => sum + Number(row.amount || 0), 0)
+  const movementTotal = statement?.entries?.reduce((sum, entry) => sum + Number(entry.amount || 0), 0) || 0
+  const balanceDifference = statement ? Number(statement.closing_balance) - Number(statement.opening_balance) - movementTotal : 0
+  const tabs = [['pagar', 'Contas a pagar'], ['receber', 'Contas a receber'], ['baixas', 'Baixas'], ['conciliacao', 'Conciliação'], ['relatorios', 'Relatórios']]
+
+  return <>
+    <FinanceSectionHeading kicker="GESTÃO FINANCEIRA" title="Financeiro" description="Contas, baixas, extratos conciliados e relatórios por período." action={mayCreate && ['pagar', 'receber'].includes(tab) && <button className="blue-button" onClick={() => setModal({ kind: 'account', type: tab })}><Plus size={17} /> {tab === 'pagar' ? 'Nova conta a pagar' : 'Nova conta a receber'}</button>} />
+    <div className="metric-grid three"><FinanceMetric icon={WalletCards} label="Total a pagar" value={money(totalPayable)} detail={`${payables.length} lançamentos`} color="amber" /><FinanceMetric icon={ReceiptText} label="Total a receber" value={money(totalReceivable)} detail={`${receivables.length} lançamentos`} color="blue" /><FinanceMetric icon={BarChart3} label="Resultado previsto" value={money(totalReceivable - totalPayable)} detail="Receitas menos compromissos" color="green" /></div>
+    <div className="finance-tabs">{tabs.map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>{label}</button>)}</div>
+
+    {['pagar', 'receber'].includes(tab) && <div className="page-panel panel"><FinancePanelHeading title={tab === 'pagar' ? 'Contas a pagar' : 'Contas a receber'} subtitle="Lançamentos da empresa atual" /><div className="table-scroll"><table><thead><tr><th>DESCRIÇÃO</th><th>VENCIMENTO</th><th>VALOR</th><th>STATUS</th><th /></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><b>{account.description}</b><small>{account.document_number || account.document || 'Sem documento'}</small></td><td>{dateLabel(account.due_date)}</td><td>{money(account.amount)}</td><td><em className={`status ${['PAGA', 'RECEBIDA'].includes(account.status) ? 'green' : 'amber'}`}>{account.status === 'PARCIAL' ? 'PARCIAL' : account.status}</em></td><td>{maySettle && !['PAGA', 'RECEBIDA'].includes(account.status) && <button className="table-action" onClick={() => setModal({ kind: 'settlement', type: tab, account })}>{tab === 'pagar' ? 'Dar baixa' : 'Registrar recebimento'}</button>}</td></tr>)}</tbody></table>{!accounts.length && <div className="empty">Nenhum lançamento financeiro cadastrado.</div>}</div></div>}
+
+    {tab === 'baixas' && <div className="page-panel panel"><FinancePanelHeading title="Baixas e recebimentos" subtitle="Histórico de pagamentos e recebimentos registrados" action={<button className="outline-button" onClick={() => { const from = `${new Date().getFullYear()}-01-01`; void api(`/finance/settlements?from=${from}&to=${dateNow()}`).then((rows) => { const csv = [['Data', 'Tipo', 'Conta', 'Valor', 'Forma', 'Banco'], ...rows.map((r) => [r.settlement_date, r.account_type, r.account_description, Number(r.amount).toFixed(2), r.payment_method, r.bank_account])]; const blob = new Blob([`\uFEFF${csv.map((line) => line.map(escapeCsv).join(';')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'baixas-financeiras.csv'; a.click(); URL.revokeObjectURL(url) }).catch((error) => notify(error.message)) }}><ArrowDownToLine size={15} /> Exportar baixas</button>} /><SettlementsList session={session} onError={(message) => notify(message)} /></div>}
+
+    {tab === 'conciliacao' && <div className="page-panel panel"><FinancePanelHeading title="Conciliação bancária" subtitle="Importe um OFX ou lance um extrato manualmente" action={mayCreate && <><button className="outline-button" onClick={() => setModal({ kind: 'manual-statement' })}><Plus size={15} /> Extrato manual</button><button className="blue-button" onClick={() => setModal({ kind: 'ofx' })}><Upload size={15} /> Importar OFX</button></>} />{statement ? <><div className="finance-statement-header"><div><button className="table-action" onClick={() => setStatement(null)}>← Extratos</button><h3>{statement.bank_account}</h3><p>{dateLabel(statement.period_start)} até {dateLabel(statement.period_end)} · {statement.source} · {statement.status}</p></div><div><span>Diferença do saldo</span><strong className={Math.abs(balanceDifference) <= 0.01 ? 'finance-match' : 'finance-unmatched'}>{money(balanceDifference)}</strong></div></div>{statement.status === 'ABERTA' && mayCreate && <div className="finance-manual-entry"><form key={`${statement.id}-${statement.entries?.length || 0}`} onSubmit={addManualEntry}><input type="date" name="date" min={statement.period_start} max={statement.period_end} defaultValue={dateNow()} required /><input name="description" placeholder="Descrição do movimento" maxLength="500" required /><input type="number" name="amount" step="0.01" placeholder="Valor (+ entrada / − saída)" required /><button className="outline-button"><Plus size={14} /> Movimento manual</button></form></div>}<div className="table-scroll"><table><thead><tr><th>DATA</th><th>MOVIMENTO DO EXTRATO</th><th>VALOR</th><th>LANÇAMENTO</th><th /></tr></thead><tbody>{statement.entries?.map((entry) => <tr key={entry.id}><td>{dateLabel(entry.entry_date)}</td><td>{entry.description}</td><td className={Number(entry.amount) < 0 ? 'finance-unmatched' : 'finance-match'}>{money(entry.amount)}</td><td>{entry.transaction_id ? <span className="finance-match"><Check size={14} /> {entry.matched_description}</span> : <span className="finance-unmatched">Pendente</span>}</td><td>{statement.status === 'ABERTA' && !entry.transaction_id && mayCreate && <button className="table-action" onClick={() => void findCandidates(entry)}><ArrowRightLeft size={14} /> Conciliar</button>}</td></tr>)}</tbody></table></div>{candidateEntry && statement.status === 'ABERTA' && <div className="finance-candidate-panel"><h3>Correspondências sugeridas</h3><button className="modal-x" onClick={() => setCandidateEntry(null)}><X size={16} /></button>{candidates.map((candidate) => <div className="finance-candidate" key={candidate.id}><span>{dateLabel(candidate.transaction_date)} · {candidate.description} · {money(candidate.amount)}</span><button className="outline-button" onClick={() => reconcile(statement.entries.find((item) => item.id === candidateEntry), candidate.id)}>Vincular</button></div>)}{!candidates.length && <p>Não encontramos lançamento de mesmo valor e tipo na semana dessa movimentação.</p>}<button className="blue-button" onClick={() => reconcile(statement.entries.find((item) => item.id === candidateEntry), null, true)}>Registrar como novo lançamento</button></div>}{statement.status === 'ABERTA' && mayCreate && <div className="finance-close-bar"><span>{statement.entries?.filter((entry) => entry.transaction_id).length || 0} de {statement.entries?.length || 0} movimentos conciliados</span><button className="blue-button" disabled={!statement.entries?.length || statement.entries.some((entry) => !entry.transaction_id) || Math.abs(balanceDifference) > 0.01} onClick={closeStatement}><Check size={15} /> Fechar conciliação</button></div>}</> : <StatementsList statements={statements} onOpen={openStatement} onRefresh={loadStatements} onImport={() => setModal({ kind: 'ofx' })} />}</div>}
+
+    {tab === 'relatorios' && <div className="page-panel panel"><FinancePanelHeading title="Relatórios conciliados" subtitle="Consulte extratos encerrados em qualquer período" /><form className="finance-report-filter" onSubmit={generateReport}><label className="field"><span>De</span><input type="date" value={reportRange.from} onChange={(e) => setReportRange((x) => ({ ...x, from: e.target.value }))} required /></label><label className="field"><span>Até</span><input type="date" value={reportRange.to} onChange={(e) => setReportRange((x) => ({ ...x, to: e.target.value }))} required /></label><button className="blue-button"><FileText size={15} /> Consultar período</button></form>{report && <><div className="metric-grid three"><FinanceMetric icon={ArrowRightLeft} label="Entradas conciliadas" value={money(report.totals.income)} detail={`${report.statements.length} extrato(s)`} color="blue" /><FinanceMetric icon={ArrowDownToLine} label="Saídas conciliadas" value={money(report.totals.expense)} detail={`${report.entries.length} movimentação(ões)`} color="amber" /><FinanceMetric icon={BarChart3} label="Resultado líquido" value={money(report.totals.net)} detail={`${dateLabel(report.from)} a ${dateLabel(report.to)}`} color="green" /></div><div className="finance-report-actions"><span>{report.statements.length} extrato(s) encerrado(s) · {report.entries.length} movimentação(ões)</span><button className="outline-button" onClick={downloadReport}><ArrowDownToLine size={15} /> Baixar CSV</button></div><div className="table-scroll"><table><thead><tr><th>DATA</th><th>CONTA</th><th>DESCRIÇÃO</th><th>TIPO</th><th>VALOR</th></tr></thead><tbody>{report.entries.map((entry) => <tr key={entry.id}><td>{dateLabel(entry.entry_date)}</td><td>{entry.bank_account}</td><td>{entry.description}</td><td>{Number(entry.amount) < 0 ? 'Saída' : 'Entrada'}</td><td>{money(entry.amount)}</td></tr>)}</tbody></table>{!report.entries.length && <div className="empty">Nenhum movimento conciliado nesse período.</div>}</div></>}</div>}
+
+    {modal?.kind === 'account' && <FinanceAccountModal type={modal.type} onClose={() => setModal(null)} onSave={async (data) => { if (await onCreate(modal.type === 'pagar' ? 'payable' : 'receivable', data)) setModal(null) }} />}
+    {modal?.kind === 'settlement' && <SettlementModal type={modal.type} account={modal.account} onClose={() => setModal(null)} onSave={async (data) => { const ok = await onSettle(modal.type === 'pagar' ? 'payable' : 'receivable', modal.account, data); if (ok) { setModal(null); notify('Baixa registrada.') } }} />}
+    {modal?.kind === 'manual-statement' && <StatementModal onClose={() => setModal(null)} onSubmit={createManualStatement} busy={busy} />}
+    {modal?.kind === 'ofx' && <div className="modal-layer" onClick={() => setModal(null)}><form className="modal-card finance-modal" onClick={(e) => e.stopPropagation()} onSubmit={importStatement}><button type="button" className="modal-x" onClick={() => setModal(null)}><X size={18} /></button><span className="section-kicker">CONCILIAÇÃO BANCÁRIA</span><h2>Importar extrato OFX</h2><label className="field"><span>Arquivo OFX</span><input type="file" accept=".ofx,application/x-ofx,application/ofx" required onChange={async (event) => { const input = event.currentTarget; const form = input.form; const file = input.files?.[0]; if (!file) return; try { const parsed = parseOfx(await file.text()); setOfxFile(file); setOfxDetails(parsed); const total = parsed.entries.reduce((sum, entry) => sum + entry.amount, 0); if (parsed.accountId) form.elements.bank_account.value = parsed.accountId; if (parsed.periodStart) form.elements.period_start.value = parsed.periodStart; if (parsed.periodEnd) form.elements.period_end.value = parsed.periodEnd; if (parsed.closing !== null) form.elements.closing_balance.value = parsed.closing; if (parsed.closing !== null) form.elements.opening_balance.value = (parsed.closing - total).toFixed(2); notify(`${parsed.entries.length} movimentação(ões) identificada(s). Confira os dados antes de importar.`) } catch { setOfxFile(null); setOfxDetails(null); notify('Não foi possível ler esse arquivo OFX.') } }} /></label>{ofxFile && <p className="finance-ofx-summary">{ofxFile.name} · {ofxDetails?.entries.length || 0} movimento(s)</p>}<label className="field"><span>Banco / conta</span><input name="bank_account" defaultValue="" required /></label><div className="form-grid"><label className="field"><span>Início do período</span><input type="date" name="period_start" required /></label><label className="field"><span>Fim do período</span><input type="date" name="period_end" required /></label></div><div className="form-grid"><label className="field"><span>Saldo inicial</span><input type="number" step="0.01" name="opening_balance" required /></label><label className="field"><span>Saldo final</span><input type="number" step="0.01" name="closing_balance" required /></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setModal(null)}>Cancelar</button><button className="blue-button" disabled={busy || !ofxFile}><Upload size={15} /> Importar e conferir</button></div></form></div>}
+  </>
+}
+
+function FinancePanelHeading({ title, subtitle, action }) { return <div className="panel-heading"><div><h2>{title}</h2><p>{subtitle}</p></div>{action && <div className="finance-heading-actions">{action}</div>}</div> }
+function FinanceSectionHeading({ kicker, title, description, action }) { return <section className="section-heading"><div><span className="section-kicker">{kicker}</span><h1>{title}</h1><p>{description}</p></div>{action}</section> }
+function FinanceMetric({ icon: Icon, label, value, detail, color }) { return <article className="metric"><div className={`metric-icon ${color}`}><Icon size={18} /></div><span>{label}</span><strong>{value}</strong><small>{detail}</small></article> }
+function StatementsList({ statements, onOpen, onRefresh, onImport }) { return <><div className="finance-statements-toolbar"><span>Extratos da empresa</span><div><button className="outline-button" onClick={onRefresh}><RefreshCw size={14} /> Atualizar</button><button className="blue-button" onClick={onImport}><Upload size={14} /> Importar OFX</button></div></div>{statements.length ? statements.map((item) => <button className="finance-statement-row" key={item.id} onClick={() => onOpen(item.id)}><div><b>{item.bank_account}</b><small>{dateLabel(item.period_start)} a {dateLabel(item.period_end)} · {item.source}</small></div><span>{item.matched_count}/{item.entry_count} conciliados</span><em className={`status ${item.status === 'CONCILIADA' ? 'green' : 'amber'}`}>{item.status}</em></button>) : <div className="empty">Nenhum extrato importado.</div>}</> }
+function SettlementsList({ session, onError }) { const [rows, setRows] = useState([]); useEffect(() => { fetch(`${API_URL}/finance/settlements`, { headers: { Authorization: `Bearer ${session.token}` } }).then((r) => r.json()).then((data) => { if (!Array.isArray(data)) throw new Error(data.error || 'Não foi possível carregar as baixas.'); setRows(data) }).catch((error) => onError(error.message)) }, [session.token]); return <div className="table-scroll"><table><thead><tr><th>DATA</th><th>TIPO</th><th>CONTA / DESCRIÇÃO</th><th>VALOR</th><th>FORMA / BANCO</th><th>REFERÊNCIA</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}><td>{dateLabel(row.settlement_date)}</td><td>{row.account_type === 'PAGAR' ? 'Pagamento' : 'Recebimento'}</td><td>{row.account_description || 'Lançamento'}</td><td>{money(row.amount)}</td><td>{[row.payment_method, row.bank_account].filter(Boolean).join(' · ') || '—'}</td><td>{row.reference || '—'}</td></tr>)}</tbody></table>{!rows.length && <div className="empty">Ainda não há baixas registradas.</div>}</div> }
+function FinanceAccountModal({ type, onClose, onSave }) { const payable = type === 'pagar'; return <div className="modal-layer" onClick={onClose}><form className="modal-card finance-modal" onClick={(e) => e.stopPropagation()} onSubmit={(event) => { event.preventDefault(); const data = Object.fromEntries(new FormData(event.currentTarget).entries()); void onSave({ ...data, amount: Number(data.amount) }) }}><button type="button" className="modal-x" onClick={onClose}><X size={18} /></button><span className="section-kicker">{payable ? 'CONTAS A PAGAR' : 'CONTAS A RECEBER'}</span><h2>{payable ? 'Nova conta a pagar' : 'Nova conta a receber'}</h2><label className="field"><span>Descrição</span><input name="description" required maxLength="200" placeholder={payable ? 'Fornecedor e motivo' : 'Cliente e motivo'} /></label><div className="form-grid"><label className="field"><span>Vencimento</span><input name="due_date" type="date" required /></label><label className="field"><span>Valor</span><input name="amount" type="number" min="0.01" step="0.01" required /></label></div><label className="field"><span>Número do documento</span><input name="document_number" maxLength="100" /></label><label className="field"><span>Observações</span><textarea name="observations" /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancelar</button><button className="blue-button">Salvar conta</button></div></form></div> }
+function SettlementModal({ type, account, onClose, onSave }) { const [busy, setBusy] = useState(false); const payable = type === 'pagar'; return <div className="modal-layer" onClick={onClose}><form className="modal-card finance-modal" onClick={(e) => e.stopPropagation()} onSubmit={async (event) => { event.preventDefault(); setBusy(true); const form = Object.fromEntries(new FormData(event.currentTarget).entries()); await onSave({ ...form, account_id: account.id, account_type: payable ? 'PAGAR' : 'RECEBER', amount: Number(form.amount) }); setBusy(false) }}><button type="button" className="modal-x" onClick={onClose}><X size={18} /></button><span className="section-kicker">BAIXA FINANCEIRA</span><h2>{payable ? 'Registrar pagamento' : 'Registrar recebimento'}</h2><p>{account.description} · valor lançado {money(account.amount)}</p><div className="form-grid"><label className="field"><span>Valor da baixa</span><input name="amount" type="number" min="0.01" max={account.amount} step="0.01" defaultValue={account.amount} required /></label><label className="field"><span>Data</span><input name="settlement_date" type="date" defaultValue={dateNow()} required /></label></div><div className="form-grid"><label className="field"><span>Meio de pagamento</span><select name="payment_method" defaultValue=""><option value="">Selecione</option>{['PIX', 'TRANSFERENCIA', 'BOLETO', 'DINHEIRO', 'CARTAO', 'OUTRO'].map((item) => <option key={item} value={item}>{item}</option>)}</select></label><label className="field"><span>Banco / conta</span><input name="bank_account" maxLength="120" placeholder="Conta usada" /></label></div><label className="field"><span>Referência</span><input name="reference" maxLength="120" placeholder="NSU, comprovante ou identificação" /></label><label className="field"><span>Observações</span><textarea name="notes" /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancelar</button><button className="blue-button" disabled={busy}>{busy ? 'Salvando…' : 'Confirmar baixa'}</button></div></form></div> }
+function StatementModal({ onClose, onSubmit, busy }) { return <div className="modal-layer" onClick={onClose}><form className="modal-card finance-modal" onClick={(e) => e.stopPropagation()} onSubmit={onSubmit}><button type="button" className="modal-x" onClick={onClose}><X size={18} /></button><span className="section-kicker">CONCILIAÇÃO MANUAL</span><h2>Novo extrato manual</h2><label className="field"><span>Banco / conta</span><input name="bank_account" required maxLength="120" /></label><div className="form-grid"><label className="field"><span>Início do período</span><input type="date" name="period_start" required /></label><label className="field"><span>Fim do período</span><input type="date" name="period_end" required /></label></div><div className="form-grid"><label className="field"><span>Saldo inicial</span><input type="number" step="0.01" name="opening_balance" required /></label><label className="field"><span>Saldo final</span><input type="number" step="0.01" name="closing_balance" required /></label></div><p>Depois de criar, inclua cada entrada como valor positivo e cada saída como valor negativo.</p><div className="modal-actions"><button type="button" className="outline-button" onClick={onClose}>Cancelar</button><button className="blue-button" disabled={busy}>{busy ? 'Criando…' : 'Criar extrato'}</button></div></form></div> }
