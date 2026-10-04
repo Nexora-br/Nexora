@@ -1,5 +1,6 @@
 const express = require('express')
 const PDFDocument = require('pdfkit')
+const path = require('path')
 
 const nrCatalog = [
   ['NR-01', 'Disposições Gerais e Gerenciamento de Riscos Ocupacionais'],
@@ -14,6 +15,10 @@ const nrCatalog = [
   ['NR-35', 'Trabalho em Altura'],
 ]
 const catalog = new Map(nrCatalog)
+const monthNames = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+const dateLong = (value) => { const [year, month, day] = String(value || '').slice(0, 10).split('-').map(Number); return `${day} de ${monthNames[month - 1]} de ${year}` }
+function companySite(company) { const address = [company.address, company.address_number, company.district].filter(Boolean).join(', '); const city = [company.city, company.state].filter(Boolean).join('/'); const detail = [address, city].filter(Boolean).join(' - '); return detail ? `${company.trade_name} - ${detail}` : company.trade_name }
+function drawCenteredFit(pdf, value, x, y, width, maxSize = 15, minSize = 9) { let size = maxSize; pdf.font('Helvetica-Bold'); while (size > minSize && pdf.widthOfString(value, { size }) > width - 8) size -= 0.5; pdf.fontSize(size).text(value, x, y, { width, align: 'center', lineBreak: false }) }
 const validDate = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
 
 function createSafetyRoutes({ db, auth, requirePermission, audit }) {
@@ -38,10 +43,11 @@ function createSafetyRoutes({ db, auth, requirePermission, audit }) {
     const employeeId = String(request.body?.employee_id || '')
     const issueDate = String(request.body?.issue_date || '')
     const expiresAt = request.body?.expires_at ? String(request.body.expires_at) : null
-    const instructorName = String(request.body?.instructor_name || '').trim().slice(0, 160)
-    const instructorRegistration = String(request.body?.instructor_registration || '').trim().slice(0, 100) || null
+    const technicalEmployee = await db.get("SELECT name FROM employees WHERE company_id = ? AND status = 'ATIVO' AND LOWER(COALESCE(job_title, '')) LIKE '%seguran%' ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, name LIMIT 1", [request.user.company_id, request.user.id])
+    const instructorName = String(technicalEmployee?.name || request.user.name || '').trim().slice(0, 160)
+    const instructorRegistration = null
     const certificates = Array.isArray(request.body?.certificates) ? request.body.certificates : []
-    if (!employeeId || !validDate(issueDate) || (expiresAt && !validDate(expiresAt)) || !instructorName || !certificates.length || certificates.length > nrCatalog.length) return response.status(400).json({ error: 'Confira o funcionário, as datas, o responsável e as NRs selecionadas.' })
+    if (!employeeId || !validDate(issueDate) || (expiresAt && !validDate(expiresAt)) || !instructorName || !certificates.length || certificates.length > nrCatalog.length) return response.status(400).json({ error: 'Confira o funcionário, as datas e as NRs selecionadas.' })
     const employee = await db.get('SELECT id, name FROM employees WHERE id = ? AND company_id = ?', [employeeId, request.user.company_id])
     if (!employee) return response.status(404).json({ error: 'Funcionário não encontrado nesta empresa.' })
     const unique = new Set()
@@ -52,7 +58,7 @@ function createSafetyRoutes({ db, auth, requirePermission, audit }) {
       const hours = Number(item?.workload_hours)
       if (!courseName || unique.has(nrCode) || !Number.isFinite(hours) || hours <= 0 || hours > 1000) return response.status(400).json({ error: 'Uma NR ou carga horária selecionada é inválida.' })
       unique.add(nrCode)
-      items.push({ nrCode, courseName, hours, content: String(item?.content || '').trim().slice(0, 4000) || null })
+      items.push({ nrCode, courseName, hours, content: courseName })
     }
     try {
       const created = []
@@ -72,9 +78,9 @@ function createSafetyRoutes({ db, auth, requirePermission, audit }) {
 
   router.get('/api/safety/certificates/:id/download', auth, canDownloadEmployeeCertificate, async (request, response) => {
     try {
-      const certificate = await db.get('SELECT c.*, e.name AS employee_name, e.document AS employee_document, co.name AS company_name FROM safety_certificates c JOIN employees e ON e.id = c.employee_id AND e.company_id = c.company_id JOIN companies co ON co.id = c.company_id WHERE c.id = ? AND c.company_id = ?', [request.params.id, request.user.company_id])
+      const certificate = await db.get('SELECT c.*, e.name AS employee_name, e.document AS employee_document, co.trade_name AS company_name, co.legal_name, co.address, co.address_number, co.district, co.city, co.state FROM safety_certificates c JOIN employees e ON e.id = c.employee_id AND e.company_id = c.company_id JOIN companies co ON co.id = c.company_id WHERE c.id = ? AND c.company_id = ?', [request.params.id, request.user.company_id])
       if (!certificate) return response.status(404).json({ error: 'Certificado não encontrado.' })
-      const pdf = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 54 })
+      const pdf = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 0, autoFirstPage: false })
       const chunks = []
       pdf.on('data', (chunk) => chunks.push(chunk))
       pdf.on('end', () => {
@@ -83,18 +89,29 @@ function createSafetyRoutes({ db, auth, requirePermission, audit }) {
         response.setHeader('Cache-Control', 'private, no-store')
         response.send(Buffer.concat(chunks))
       })
-      pdf.rect(24, 24, 794, 547).lineWidth(2).strokeColor('#1682a7').stroke()
-      pdf.fontSize(12).fillColor('#1682a7').text(String(certificate.company_name).toUpperCase(), { align: 'center' })
-      pdf.moveDown(1.5).fontSize(28).fillColor('#17394c').text('CERTIFICADO DE PARTICIPAÇÃO', { align: 'center' })
-      pdf.moveDown(1.2).fontSize(14).fillColor('#405965').text('Certificamos que', { align: 'center' })
-      pdf.moveDown(0.5).fontSize(25).fillColor('#17394c').text(certificate.employee_name, { align: 'center' })
-      if (certificate.employee_document) pdf.moveDown(0.25).fontSize(11).fillColor('#71858f').text(`CPF: ${certificate.employee_document}`, { align: 'center' })
-      pdf.moveDown(0.8).fontSize(14).fillColor('#405965').text(`concluiu o treinamento ${certificate.nr_code} — ${certificate.course_name}`, { align: 'center', width: 680, align: 'center' })
-      pdf.moveDown(0.6).fontSize(12).text(`Carga horária: ${certificate.workload_hours} hora(s)`, { align: 'center' })
-      if (certificate.content) pdf.moveDown(0.8).fontSize(11).text(`Conteúdo programático: ${certificate.content}`, { align: 'center', width: 680 })
-      pdf.moveDown(1.2).fontSize(12).text(`Data de emissão: ${new Date(`${certificate.issue_date}T12:00:00`).toLocaleDateString('pt-BR')}${certificate.expires_at ? `   •   Validade até: ${new Date(`${certificate.expires_at}T12:00:00`).toLocaleDateString('pt-BR')}` : ''}`, { align: 'center' })
-      pdf.moveDown(2).fontSize(12).fillColor('#17394c').text(certificate.instructor_name, { align: 'center' })
-      pdf.fontSize(10).fillColor('#71858f').text(certificate.instructor_registration ? `Responsável pelo treinamento · ${certificate.instructor_registration}` : 'Responsável pelo treinamento', { align: 'center' })
+      pdf.addPage({ size: 'A4', layout: 'landscape', margin: 0 })
+      const pageWidth = pdf.page.width
+      const pageHeight = pdf.page.height
+      pdf.image(path.join(__dirname, 'assets', 'certificate-template.png'), 0, 0, { width: pageWidth, height: pageHeight })
+      const scaleX = pageWidth / 2000
+      const scaleY = pageHeight / 1414
+      pdf.image(path.join(__dirname, 'assets', 'certificate-medal-center.png'), 176 * scaleX, 189 * scaleY, { width: 138 * scaleX, height: 138 * scaleY })
+      const fullDate = dateLong(certificate.issue_date)
+      const site = companySite(certificate)
+      const narrative = `Certificamos que ${certificate.employee_name} concluiu com aproveitamento satisfatório o “Curso básico de ${certificate.nr_code}, ${certificate.course_name}”, realizado no dia ${fullDate} nas dependências do estabelecimento ${site}, ${fullDate}.`
+      // The white fields cover the editable placeholders in the supplied artwork.
+      pdf.fillColor('#fbfbfc').rect(92, 322, pageWidth - 184, 91).fill()
+      const narrativeWidth = pageWidth - 206
+      let bodySize = 13.4
+      pdf.font('Helvetica')
+      while (bodySize > 11 && pdf.heightOfString(narrative, { width: narrativeWidth, fontSize: bodySize, lineGap: 2 }) > 78) bodySize -= 0.4
+      pdf.fillColor('#152638').fontSize(bodySize).text(narrative, 103, 330, { width: narrativeWidth, height: 78, align: 'center', lineGap: 2, paragraphGap: 0 })
+      pdf.fillColor('#fbfbfc').rect(187, 425, 215, 60).fill()
+      pdf.fillColor('#fbfbfc').rect(423, 420, 235, 69).fill()
+      pdf.fillColor('#173d62')
+      pdf.font('Helvetica-Bold').fillColor('#523815').fontSize(12).text(certificate.nr_code, 73, 101, { width: 60, align: 'center', lineBreak: false })
+      drawCenteredFit(pdf, certificate.company_name || certificate.legal_name, 190, 443, 220, 15, 9)
+      drawCenteredFit(pdf, certificate.instructor_name, 428, 439, 225, 14, 9)
       pdf.end()
     } catch (error) { console.error(error); if (!response.headersSent) response.status(500).json({ error: 'Não foi possível gerar o arquivo do certificado.' }) }
   })

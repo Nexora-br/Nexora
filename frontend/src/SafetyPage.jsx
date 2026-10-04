@@ -18,9 +18,6 @@ export function SafetyPage({ session, can, notify }) {
   const [hours, setHours] = useState({})
   const [issueDate, setIssueDate] = useState(today())
   const [expiresAt, setExpiresAt] = useState('')
-  const [instructor, setInstructor] = useState(session.userName || '')
-  const [registration, setRegistration] = useState('')
-  const [content, setContent] = useState('')
   const [saving, setSaving] = useState(false)
   const headers = { Authorization: `Bearer ${session.token}` }
 
@@ -45,11 +42,11 @@ export function SafetyPage({ session, can, notify }) {
     try {
       const response = await fetch(`${API_URL}/safety/certificates`, {
         method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employee_id: selectedEmployee, issue_date: issueDate, expires_at: expiresAt || null, instructor_name: instructor, instructor_registration: registration, certificates: selectedNrs.map((nr_code) => ({ nr_code, workload_hours: Number(hours[nr_code]), content })) }),
+        body: JSON.stringify({ employee_id: selectedEmployee, issue_date: issueDate, expires_at: expiresAt || null, certificates: selectedNrs.map((nr_code) => ({ nr_code, workload_hours: Number(hours[nr_code]) })) }),
       })
       const result = await response.json()
       if (!response.ok) throw new Error(result.error || 'Não foi possível emitir os certificados.')
-      setSelectedNrs([]); setContent(''); await load(); notify(`${result.length} certificado(s) emitido(s).`)
+      setSelectedNrs([]); await load(); notify(`${result.length} certificado(s) emitido(s).`)
     } catch (saveError) { notify(saveError.message || 'Não foi possível emitir os certificados.') }
     setSaving(false)
   }
@@ -61,7 +58,7 @@ export function SafetyPage({ session, can, notify }) {
     <div className="section-heading"><div><span className="section-kicker">SAÚDE E SEGURANÇA DO TRABALHO</span><h1>Segurança do Trabalho</h1><p>Emita certificados de treinamento por NR para os funcionários cadastrados.</p></div><button className="outline-button" onClick={load}><RefreshCw size={15} /> Atualizar</button></div>
     {error && <div className="data-state" role="alert">{error}<button className="blue-button" onClick={load}>Tentar novamente</button></div>}
     {can('safety_certificates', 'create') && <form className="panel safety-form" onSubmit={issueCertificates}>
-      <div className="safety-panel-heading"><div><h2>Emitir certificados</h2><p>As informações pessoais são carregadas diretamente do cadastro de funcionários.</p></div></div>
+      <div className="safety-panel-heading"><div><h2>Emitir certificados</h2><p>Funcionário, empresa, local e responsável técnico são preenchidos automaticamente pelo Nexora.</p></div></div>
       <div className="safety-form-grid">
         <label className="field"><span>Funcionário</span><select value={selectedEmployee} onChange={(event) => setSelectedEmployee(event.target.value)} required><option value="">Selecione um funcionário</option>{employees.map((item) => <option key={item.id} value={item.id}>{item.name}{item.status !== 'ATIVO' ? ` · ${item.status}` : ''}</option>)}</select></label>
         <label className="field"><span>CPF</span><input value={employee?.document || 'Não informado no cadastro'} readOnly /></label>
@@ -69,12 +66,9 @@ export function SafetyPage({ session, can, notify }) {
         <label className="field"><span>Setor</span><input value={employee?.department || 'Não informado no cadastro'} readOnly /></label>
         <label className="field"><span>Data de emissão</span><input type="date" value={issueDate} onChange={(event) => setIssueDate(event.target.value)} required /></label>
         <label className="field"><span>Validade (opcional)</span><input type="date" value={expiresAt} onChange={(event) => setExpiresAt(event.target.value)} /></label>
-        <label className="field"><span>Responsável pelo treinamento</span><input value={instructor} onChange={(event) => setInstructor(event.target.value)} required /></label>
-        <label className="field"><span>Registro profissional (opcional)</span><input value={registration} onChange={(event) => setRegistration(event.target.value)} placeholder="Ex.: registro profissional" /></label>
       </div>
       <div className="safety-nr-heading"><strong>Normas regulamentadoras</strong><span>Marque todas as NRs deste treinamento.</span></div>
       <div className="safety-nr-list">{nrOptions.map(([code, label]) => <label className={`safety-nr-option ${selectedNrs.includes(code) ? 'selected' : ''}`} key={code}><input type="checkbox" checked={selectedNrs.includes(code)} onChange={(event) => setSelectedNrs((current) => event.target.checked ? [...current, code] : current.filter((item) => item !== code))} /><span><b>{code}</b><small>{label}</small></span>{selectedNrs.includes(code) && <input aria-label={`Carga horária ${code}`} className="safety-hours" type="number" min="0.5" max="1000" step="0.5" required placeholder="Horas" value={hours[code] || ''} onChange={(event) => setHours((current) => ({ ...current, [code]: event.target.value }))} />}</label>)}</div>
-      <label className="field safety-content"><span>Conteúdo programático</span><textarea value={content} onChange={(event) => setContent(event.target.value)} rows="3" placeholder="Assuntos abordados no treinamento" /></label>
       <div className="modal-actions"><span /> <button className="blue-button" disabled={saving || loading || !employees.length}>{saving ? 'Emitindo...' : `Emitir ${selectedNrs.length || ''} certificado(s)`}</button></div>
     </form>}
   </>
