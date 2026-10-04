@@ -287,6 +287,11 @@ button, input, select, textarea { font-family: inherit; }
 .employee-expiry-dot.green { background:#35a66f; }
 .employee-expiry-dot.amber { background:#e9a528; }
 .employee-expiry-dot.red { background:#df5a5a; }
+.checklist-request-list { display:grid; gap:8px; max-height:45vh; overflow:auto; margin:18px 0; }
+.checklist-request-option { display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%; padding:14px 16px; border:1px solid #dce9ef; border-radius:12px; background:#f8fbfc; color:#28536a; text-align:left; cursor:pointer; }
+.checklist-request-option:hover { border-color:#78b9cf; background:#f0f8fb; }
+.checklist-request-option span { display:grid; gap:5px; }
+.checklist-request-option small { color:#7893a1; }
 .employee-empty { display:flex; min-height:125px; align-items:center; justify-content:center; flex-direction:column; gap:12px; padding:24px; color:#8ba0aa; font-size:12px; text-align:center; }
 .employee-error { color:#a24f50; }
 .employee-form,.employee-detail,.employee-terminate { width:min(100%,680px); max-height:min(91vh,920px); overflow-y:auto; }
