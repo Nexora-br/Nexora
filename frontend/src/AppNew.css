@@ -283,6 +283,10 @@ button, input, select, textarea { font-family: inherit; }
 .employee-panel .panel-heading p { margin:5px 0 0; color:#91a5ae; font-size:10px; }
 .employee-panel table { width:100%; }
 .employee-doc-count { display:inline-flex; align-items:center; gap:5px; color:#628293; font-size:11px; }
+.employee-expiry-dot { display:inline-block; width:14px; height:14px; border-radius:50%; box-shadow:0 0 0 4px #edf4f6; vertical-align:middle; }
+.employee-expiry-dot.green { background:#35a66f; }
+.employee-expiry-dot.amber { background:#e9a528; }
+.employee-expiry-dot.red { background:#df5a5a; }
 .employee-empty { display:flex; min-height:125px; align-items:center; justify-content:center; flex-direction:column; gap:12px; padding:24px; color:#8ba0aa; font-size:12px; text-align:center; }
 .employee-error { color:#a24f50; }
 .employee-form,.employee-detail,.employee-terminate { width:min(100%,680px); max-height:min(91vh,920px); overflow-y:auto; }
