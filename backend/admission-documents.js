@@ -99,7 +99,7 @@ const textFor = (key, employee, company, date) => {
   }
 }
 
-function makePdf(key, employee, company, issueDate) {
+function makePdf(key, employee, company, issueDate, { preview = false } = {}) {
   return new Promise((resolve, reject) => {
     const pdf = new PDFDocument({ size: 'A4', margin: 54, bufferPages: true })
     const chunks = []
@@ -112,6 +112,7 @@ function makePdf(key, employee, company, issueDate) {
     if (logoMatch) {
       try { pdf.image(Buffer.from(logoMatch[2], 'base64'), 54, 35, { fit: [70, 45] }); titleY = 92 } catch (_error) { /* Ignore a damaged optional logo and still generate the document. */ }
     }
+    if (preview) pdf.font('Helvetica-Bold').fontSize(8).fillColor('#6d8793').text('PRÉVIA DE MODELO — DADOS FICTÍCIOS', 54, 22, { align: 'center', width: 487 })
     const lines = textFor(key, employee, company, fullDate(issueDate))
     const title = lines.shift() || template.label
     pdf.font('Helvetica-Bold').fontSize(16).fillColor('#183d5b').text(title, 54, titleY, { align: 'center', width: 487 })

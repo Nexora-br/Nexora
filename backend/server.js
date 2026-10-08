@@ -15,7 +15,7 @@ const createFinanceRoutes = require('./finance-routes')
 const createWorkDiaryRoutes = require('./work-diary-routes')
 const createEmployeeRoutes = require('./employee-routes')
 const { createSafetyRoutes } = require('./safety-routes')
-const { admissionDocumentKeys } = require('./admission-documents')
+const { admissionDocumentKeys, admissionDocuments, makePdf } = require('./admission-documents')
 const createTeamRoutes = require('./team-routes')
 const createTaskRoutes = require('./task-routes')
 const { createSubscriptionRoutes } = require('./subscription-routes')
@@ -138,6 +138,35 @@ app.use((request, response, next) => { if (request.path.startsWith('/api/auth') 
 app.use('/api', (request, response, next) => { if (request.subscriptionEnforcementHandled || request.path.startsWith('/auth') || request.path === '/health' || request.path.startsWith('/subscription') || !request.headers.authorization?.startsWith('Bearer ')) return next(); auth(request, response, () => enforceActiveSubscription(request, response, next)) })
 
 app.get('/api/health', (_request, response) => response.json({ status: 'ok', service: 'nexora-api', database: process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite local', commit: process.env.RENDER_GIT_COMMIT || null }))
+
+const admissionPreviewData = {
+  employee: {
+    name: 'João da Silva', document: '000.000.000-00', job_title: 'Auxiliar de montagem', department: 'Montagem',
+    registration_number: '0001', admission_date: '2026-01-15', home_address: 'Rua das Flores', home_address_number: '45',
+    home_district: 'Centro', home_city: 'Goiânia', home_state: 'GO',
+  },
+  company: {
+    legal_name: 'Empresa Exemplo Ltda.', trade_name: 'Empresa Exemplo', cnpj: '00.000.000/0001-00',
+    address: 'Avenida Exemplo', address_number: '100', district: 'Centro', city: 'Goiânia', state: 'GO',
+    salary_bank_name: 'Banco Exemplo', reimbursement_dinner: 45, reimbursement_lunch: 35, reimbursement_breakfast: 20,
+  },
+}
+const admissionPreviewCache = new Map()
+app.get('/api/admission-documents/:key/preview', async (request, response) => {
+  const { key } = request.params
+  if (!admissionDocumentKeys.has(key)) return response.status(404).json({ error: 'Modelo de admissão não encontrado.' })
+  try {
+    let preview = admissionPreviewCache.get(key)
+    if (!preview) {
+      preview = await makePdf(key, admissionPreviewData.employee, admissionPreviewData.company, admissionPreviewData.employee.admission_date, { preview: true })
+      admissionPreviewCache.set(key, preview)
+    }
+    response.type('application/pdf').set('Content-Disposition', `inline; filename="previa-${key}.pdf"`).send(preview)
+  } catch (error) {
+    console.error('Admission document preview:', error)
+    response.status(500).json({ error: 'Não foi possível gerar a prévia deste documento.' })
+  }
+})
 
 const MAX_AI_MESSAGE_LENGTH = 500
 const aiModuleMap = {
