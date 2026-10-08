@@ -3,6 +3,7 @@ const multer = require('multer')
 const crypto = require('crypto')
 const fs = require('fs')
 const path = require('path')
+const { admissionDocuments, admissionDocumentKeys, makePdf } = require('./admission-documents')
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const categories = new Set(['CERTIFICADO', 'ASO', 'FICHA_ADMISSAO', 'CARTEIRA_TRABALHO', 'TERMO_RESPONSABILIDADE', 'ADVERTENCIA', 'OUTRO'])
@@ -26,6 +27,15 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
   }).single('file')
 
   const permission = (action) => [auth, requirePermission('employees', action)]
+  const enabledDocuments = async (companyId) => {
+    const company = await db.get('SELECT admission_document_keys FROM companies WHERE id = ?', [companyId])
+    try { return (JSON.parse(company?.admission_document_keys || '[]')).filter((key) => admissionDocumentKeys.has(key)) } catch { return [] }
+  }
+  const employeeForUser = (record, user) => {
+    if (user.role === 'ADMINISTRADOR' || user.permissions?.includes('*.*') || user.permissions?.includes('employees.download')) return record
+    const { home_address: _address, home_address_number: _number, home_complement: _complement, home_district: _district, home_city: _city, home_state: _state, ...visible } = record
+    return visible
+  }
   const handleUpload = (request, response, next) => upload(request, response, async (error) => {
     if (!error) return next()
     if (request.file?.path) await fs.promises.unlink(request.file.path).catch(() => {})
@@ -87,29 +97,83 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       const status = String(request.query.status || 'ATIVO').toUpperCase()
       if (status !== 'TODOS') { where.push('e.status = ?'); params.push(status === 'DEMITIDO' ? 'DEMITIDO' : 'ATIVO') }
       const search = String(request.query.search || '').trim()
-      if (search) { where.push('(e.name LIKE ? OR e.document LIKE ? OR e.job_title LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
+      if (search) { where.push('(e.name LIKE ? OR e.document LIKE ? OR e.job_title LIKE ? OR e.registration_number LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`) }
       const today = new Date().toISOString().slice(0, 10)
       const cutoff = new Date(`${today}T00:00:00.000Z`)
       cutoff.setUTCDate(cutoff.getUTCDate() + 30)
       const expirationParams = [today, today, today, cutoff.toISOString().slice(0, 10), today, cutoff.toISOString().slice(0, 10)]
       const employees = await db.all(`SELECT e.*, u.name AS linked_user_name, ((SELECT COUNT(*) FROM employee_documents d WHERE d.employee_id = e.id AND d.company_id = e.company_id) + (SELECT COUNT(*) FROM safety_certificates c WHERE c.employee_id = e.id AND c.company_id = e.company_id)) AS document_count, ((SELECT COUNT(*) FROM employee_documents d WHERE d.employee_id = e.id AND d.company_id = e.company_id AND d.expires_at IS NOT NULL AND d.expires_at < ?) + (SELECT COUNT(*) FROM safety_certificates c WHERE c.employee_id = e.id AND c.company_id = e.company_id AND c.expires_at IS NOT NULL AND c.expires_at < ?)) AS expired_document_count, ((SELECT COUNT(*) FROM employee_documents d WHERE d.employee_id = e.id AND d.company_id = e.company_id AND d.expires_at IS NOT NULL AND d.expires_at BETWEEN ? AND ?) + (SELECT COUNT(*) FROM safety_certificates c WHERE c.employee_id = e.id AND c.company_id = e.company_id AND c.expires_at IS NOT NULL AND c.expires_at BETWEEN ? AND ?)) AS expiring_document_count FROM employees e LEFT JOIN users u ON u.id = e.user_id AND u.company_id = e.company_id WHERE ${where.join(' AND ')} ORDER BY CASE WHEN e.status = 'ATIVO' THEN 0 ELSE 1 END, e.name ASC`, [...expirationParams.slice(0, 2), ...expirationParams.slice(2), ...params])
-      response.json(employees)
+      response.json(employees.map((record) => employeeForUser(record, request.user)))
     } catch (error) { console.error('Employees list:', error); response.status(500).json({ error: 'Não foi possível carregar os funcionários.' }) }
+  })
+
+  router.get('/api/employees/admission-documents', ...permission('view'), async (request, response) => {
+    try {
+      const enabled = new Set(await enabledDocuments(request.user.company_id))
+      response.json(admissionDocuments.filter(({ key }) => enabled.has(key)))
+    } catch { response.status(500).json({ error: 'Não foi possível carregar os modelos de admissão.' }) }
   })
 
   router.post('/api/employees', ...permission('create'), async (request, response) => {
     const data = request.body || {}
     const name = String(data.name || '').trim()
+    const registrationNumber = String(data.registration_number || '').trim()
     if (!name) return response.status(400).json({ error: 'Informe o nome completo do funcionário.' })
+    if (!registrationNumber) return response.status(400).json({ error: 'Informe a matrícula do funcionário.' })
+    if (name.length > 160 || registrationNumber.length > 60) return response.status(400).json({ error: 'Confira o tamanho do nome e da matrícula.' })
     if (!validDate(data.admission_date)) return response.status(400).json({ error: 'Informe uma data de admissão válida.' })
+    const generated = []
+    let committed = false
     try {
       if (data.document && await db.get('SELECT id FROM employees WHERE company_id = ? AND document = ?', [request.user.company_id, String(data.document).trim()])) return response.status(409).json({ error: 'Já existe um funcionário com esse CPF.' })
+      if (await db.get('SELECT id FROM employees WHERE company_id = ? AND registration_number = ?', [request.user.company_id, registrationNumber])) return response.status(409).json({ error: 'Esta matrícula já está cadastrada nesta empresa.' })
+      const enabled = new Set(await enabledDocuments(request.user.company_id))
+      const requestedKeys = Array.isArray(data.generate_documents) ? [...new Set(data.generate_documents.map(String))] : []
+      if (requestedKeys.some((key) => !enabled.has(key))) return response.status(400).json({ error: 'Selecione somente modelos habilitados nas configurações da empresa.' })
+      if (requestedKeys.includes('termo_lgpd') && ![data.home_address, data.home_city, data.home_state].every((value) => String(value || '').trim())) return response.status(400).json({ error: 'Preencha o endereço residencial, município e UF para gerar o termo LGPD.' })
+      const company = await db.get('SELECT * FROM companies WHERE id = ?', [request.user.company_id])
+      if (requestedKeys.includes('conta_salario') && !String(company.salary_bank_name || '').trim()) return response.status(400).json({ error: 'Configure o banco da conta salário nos dados da empresa.' })
+      if (requestedKeys.includes('reembolso') && ['reimbursement_dinner', 'reimbursement_lunch', 'reimbursement_breakfast'].some((field) => company[field] === null || company[field] === undefined)) return response.status(400).json({ error: 'Configure os valores de reembolso nos dados da empresa.' })
       const id = crypto.randomUUID()
-      await db.run('INSERT INTO employees (id, company_id, name, document, job_title, department, email, phone, admission_date, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, request.user.company_id, name, data.document || null, data.job_title || null, data.department || null, data.email || null, data.phone || null, data.admission_date || null, data.notes || null, 'ATIVO'])
+      const employeeData = { ...data, id, name, registration_number: registrationNumber, status: 'ATIVO' }
+      for (const key of requestedKeys) {
+        const pdf = await makePdf(key, employeeData, company, data.admission_date)
+        const template = admissionDocuments.find((item) => item.key === key)
+        const documentId = crypto.randomUUID()
+        const filename = `${documentId}.pdf`
+        let storagePath
+        if (supabase) {
+          await ensureStorageBucket()
+          storagePath = `${request.user.company_id}/employees/${id}/${filename}`
+          const stored = await supabase.storage.from('nexora-documents').upload(storagePath, pdf, { contentType: 'application/pdf', upsert: false })
+          if (stored.error) throw stored.error
+          storagePath = `supabase:${storagePath}`
+        } else {
+          const directory = path.join(uploadRoot, request.user.company_id, 'employees', id)
+          await fs.promises.mkdir(directory, { recursive: true })
+          storagePath = path.join(directory, filename)
+          await fs.promises.writeFile(storagePath, pdf)
+        }
+        generated.push({ id: documentId, employee_id: id, category: 'FICHA_ADMISSAO', name: `${template.label} - ${name}.pdf`, storage_path: storagePath, file_size: pdf.length, mime_type: 'application/pdf', issue_date: data.admission_date, uploaded_by: request.user.id, buffer: pdf })
+      }
+      await db.transaction(async () => {
+        await db.run('INSERT INTO employees (id, company_id, name, document, job_title, department, email, phone, admission_date, notes, status, registration_number, home_address, home_address_number, home_complement, home_district, home_city, home_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, request.user.company_id, name, data.document || null, data.job_title || null, data.department || null, data.email || null, data.phone || null, data.admission_date || null, data.notes || null, 'ATIVO', registrationNumber, data.home_address || null, data.home_address_number || null, data.home_complement || null, data.home_district || null, data.home_city || null, data.home_state || null])
+        for (const document of generated) await db.run('INSERT INTO employee_documents (id, company_id, employee_id, category, name, storage_path, file_size, mime_type, issue_date, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [document.id, request.user.company_id, id, document.category, document.name, document.storage_path, document.file_size, document.mime_type, document.issue_date, document.uploaded_by])
+      })
+      committed = true
       const created = await employee(id, request.user.company_id)
-      await audit(request.user, 'ADMITIR', 'FUNCIONARIOS', id, null, { name, job_title: created.job_title, admission_date: created.admission_date })
-      response.status(201).json(created)
+      await audit(request.user, 'ADMITIR', 'FUNCIONARIOS', id, null, { name, job_title: created.job_title, admission_date: created.admission_date, registration_number: created.registration_number, generated_documents: generated.map(({ name: documentName }) => documentName) })
+      for (const document of generated) delete document.buffer
+      const visible = employeeForUser(created, request.user)
+      visible.generated_documents = generated.map(publicDocument)
+      response.status(201).json(visible)
     } catch (error) {
+      console.error('Employee admission:', error)
+      if (!committed) for (const document of generated) {
+        if (supabase && document.storage_path.startsWith('supabase:')) await supabase.storage.from('nexora-documents').remove([document.storage_path.slice('supabase:'.length)]).catch(() => {})
+        else if (!supabase) await fs.promises.unlink(document.storage_path).catch(() => {})
+      }
+      if (error.message?.includes('registration_number')) return response.status(409).json({ error: 'Esta matrícula já está cadastrada nesta empresa.' })
       if (error.message?.includes('UNIQUE')) return response.status(409).json({ error: 'Já existe um funcionário com esse CPF.' })
       response.status(500).json({ error: 'Não foi possível cadastrar o funcionário.' })
     }
@@ -133,23 +197,25 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       ])
       const employeeDocuments = documents.map(publicDocument)
       const certificateDocuments = certificates.map((certificate) => ({ id: `certificate-${certificate.id}`, safety_certificate_id: certificate.id, category: 'CERTIFICADO', name: `${certificate.nr_code} - ${certificate.course_name}.pdf`, file_size: 0, mime_type: 'application/pdf', issue_date: certificate.issue_date, expires_at: certificate.expires_at, folder_id: certificate.folder_id, created_at: certificate.created_at }))
-      response.json({ ...record, documents: [...employeeDocuments, ...certificateDocuments], employment_history: employmentHistory, folders })
+      response.json({ ...employeeForUser(record, request.user), documents: [...employeeDocuments, ...certificateDocuments], employment_history: employmentHistory, folders })
     } catch { response.status(500).json({ error: 'Não foi possível carregar o cadastro do funcionário.' }) }
   })
 
   router.put('/api/employees/:id', ...permission('edit'), async (request, response) => {
     const data = request.body || {}
     const name = String(data.name || '').trim()
+    const registrationNumber = String(data.registration_number || '').trim()
     if (!name) return response.status(400).json({ error: 'Informe o nome completo do funcionário.' })
     if (!validDate(data.admission_date)) return response.status(400).json({ error: 'Informe uma data de admissão válida.' })
     try {
       const previous = await employee(request.params.id, request.user.company_id)
       if (!previous) return response.status(404).json({ error: 'Funcionário não encontrado.' })
       if (data.document && await db.get('SELECT id FROM employees WHERE company_id = ? AND document = ? AND id <> ?', [request.user.company_id, String(data.document).trim(), previous.id])) return response.status(409).json({ error: 'Já existe um funcionário com esse CPF.' })
-      await db.run('UPDATE employees SET name = ?, document = ?, job_title = ?, department = ?, email = ?, phone = ?, admission_date = ?, notes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [name, data.document || null, data.job_title || null, data.department || null, data.email || null, data.phone || null, data.admission_date || null, data.notes || null, previous.id, request.user.company_id])
+      if (registrationNumber && await db.get('SELECT id FROM employees WHERE company_id = ? AND registration_number = ? AND id <> ?', [request.user.company_id, registrationNumber, previous.id])) return response.status(409).json({ error: 'Esta matrícula já está cadastrada nesta empresa.' })
+      await db.run('UPDATE employees SET name = ?, document = ?, job_title = ?, department = ?, email = ?, phone = ?, admission_date = ?, notes = ?, registration_number = ?, home_address = ?, home_address_number = ?, home_complement = ?, home_district = ?, home_city = ?, home_state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [name, data.document || null, data.job_title || null, data.department || null, data.email || null, data.phone || null, data.admission_date || null, data.notes || null, registrationNumber || previous.registration_number || null, data.home_address === undefined ? previous.home_address : data.home_address || null, data.home_address_number === undefined ? previous.home_address_number : data.home_address_number || null, data.home_complement === undefined ? previous.home_complement : data.home_complement || null, data.home_district === undefined ? previous.home_district : data.home_district || null, data.home_city === undefined ? previous.home_city : data.home_city || null, data.home_state === undefined ? previous.home_state : data.home_state || null, previous.id, request.user.company_id])
       const updated = await employee(previous.id, request.user.company_id)
       await audit(request.user, 'EDITAR', 'FUNCIONARIOS', previous.id, previous, updated)
-      response.json(updated)
+      response.json(employeeForUser(updated, request.user))
     } catch { response.status(500).json({ error: 'Não foi possível atualizar o cadastro do funcionário.' }) }
   })
 
@@ -167,7 +233,7 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       })
       const updated = await employee(previous.id, request.user.company_id)
       await audit(request.user, 'DEMITIR', 'FUNCIONARIOS', previous.id, { status: previous.status, termination_date: previous.termination_date }, { status: updated.status, termination_date: updated.termination_date })
-      response.json(updated)
+      response.json(employeeForUser(updated, request.user))
     } catch { response.status(500).json({ error: 'Não foi possível registrar o desligamento.' }) }
   })
 
@@ -191,7 +257,7 @@ function createEmployeeRoutes({ db, auth, requirePermission, audit, uploadRoot, 
       })
       const updated = await employee(previous.id, companyId)
       await audit(request.user, 'READMITIR', 'FUNCIONARIOS', previous.id, { status: previous.status, termination_date: previous.termination_date }, { status: updated.status, admission_date: updated.admission_date })
-      response.json(updated)
+      response.json(employeeForUser(updated, request.user))
     } catch (error) {
       console.error(error)
       response.status(500).json({ error: 'Não foi possível readmitir o funcionário.' })

@@ -15,6 +15,7 @@ const createFinanceRoutes = require('./finance-routes')
 const createWorkDiaryRoutes = require('./work-diary-routes')
 const createEmployeeRoutes = require('./employee-routes')
 const { createSafetyRoutes } = require('./safety-routes')
+const { admissionDocumentKeys } = require('./admission-documents')
 const createTeamRoutes = require('./team-routes')
 const createTaskRoutes = require('./task-routes')
 const { createSubscriptionRoutes } = require('./subscription-routes')
@@ -371,6 +372,15 @@ app.post('/api/auth/register', registrationRateLimit, async (request, response) 
     const normalizedState = String(state || '').trim().toUpperCase()
     const normalizedName = String(userName || '').trim()
     const companyEmail = String(request.body?.company_email || email || '').trim().toLowerCase()
+    const documentKeys = Array.isArray(request.body?.admission_document_keys) ? [...new Set(request.body.admission_document_keys.map(String))] : []
+    const logoDataUrl = String(request.body?.admission_logo_data_url || '')
+    const salaryBankName = String(request.body?.salary_bank_name || '').trim().slice(0, 120) || null
+    const reimbursement = ['dinner', 'lunch', 'breakfast'].map((key) => request.body?.[`reimbursement_${key}`] === '' || request.body?.[`reimbursement_${key}`] === undefined ? null : Number(request.body[`reimbursement_${key}`]))
+    if (documentKeys.some((key) => !admissionDocumentKeys.has(key))) return response.status(400).json({ error: 'Um ou mais modelos de admissão selecionados são inválidos.' })
+    if (logoDataUrl && (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(logoDataUrl) || Buffer.byteLength(logoDataUrl, 'utf8') > 1400000)) return response.status(400).json({ error: 'Envie a logo em PNG ou JPG com até 1 MB.' })
+    if (reimbursement.some((value) => value !== null && (!Number.isFinite(value) || value < 0 || value > 100000))) return response.status(400).json({ error: 'Confira os valores de reembolso informados.' })
+    if (documentKeys.includes('conta_salario') && !salaryBankName) return response.status(400).json({ error: 'Informe o banco da conta salário para habilitar esse documento.' })
+    if (documentKeys.includes('reembolso') && reimbursement.some((value) => value === null)) return response.status(400).json({ error: 'Informe os três valores de reembolso para habilitar esse documento.' })
     const requiredCompanyFields = [normalizedCompany, normalizedLegalName, normalizedCnpj, normalizedName, normalizedEmail]
     if (requiredCompanyFields.some((value) => !String(value || '').trim()) || !password) return response.status(400).json({ error: 'Preencha os dados da empresa e da pessoa administradora.' })
     if (!validCnpj(normalizedCnpj)) return response.status(400).json({ error: 'Informe um CNPJ válido.' })
@@ -386,7 +396,7 @@ app.post('/api/auth/register', registrationRateLimit, async (request, response) 
     const userId = id()
     const passwordHash = await bcrypt.hash(String(password), 12)
     await db.transaction(async () => {
-      await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [companyId, normalizedLegalName, normalizedCompany, normalizedCnpj, companyEmail || normalizedEmail, String(phone || '').trim() || null, String(segment || '').trim() || null, normalizedZipCode || null, String(address || '').trim() || null, String(address_number || '').trim() || null, String(complement || '').trim() || null, String(district || '').trim() || null, String(city || '').trim() || null, normalizedState || null, String(website || '').trim() || null])
+      await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website, admission_logo_data_url, admission_document_keys, salary_bank_name, reimbursement_dinner, reimbursement_lunch, reimbursement_breakfast) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [companyId, normalizedLegalName, normalizedCompany, normalizedCnpj, companyEmail || normalizedEmail, String(phone || '').trim() || null, String(segment || '').trim() || null, normalizedZipCode || null, String(address || '').trim() || null, String(address_number || '').trim() || null, String(complement || '').trim() || null, String(district || '').trim() || null, String(city || '').trim() || null, normalizedState || null, String(website || '').trim() || null, logoDataUrl || null, JSON.stringify(documentKeys), salaryBankName, ...reimbursement])
       const role = await db.get('SELECT id FROM roles WHERE name = ?', ['ADMINISTRADOR'])
       await db.run('INSERT INTO users (id, company_id, name, email, password_hash, job_title) VALUES (?, ?, ?, ?, ?, ?)', [userId, companyId, normalizedName, normalizedEmail, passwordHash, 'Administrador'])
       await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
@@ -599,8 +609,9 @@ app.post('/api/ai/chat', auth, async (request, response) => {
 
 app.get('/api/company', auth, requireAdministrator, async (request, response) => {
   try {
-    const company = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website FROM companies WHERE id = ?', [request.user.company_id])
+    const company = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website, admission_logo_data_url, admission_document_keys, salary_bank_name, reimbursement_dinner, reimbursement_lunch, reimbursement_breakfast FROM companies WHERE id = ?', [request.user.company_id])
     if (!company) return response.status(404).json({ error: 'Empresa não encontrada.' })
+    try { company.admission_document_keys = JSON.parse(company.admission_document_keys || '[]').filter((key) => admissionDocumentKeys.has(key)) } catch { company.admission_document_keys = [] }
     response.json(company)
   } catch (error) { errorResponse(response, error) }
 })
@@ -618,13 +629,26 @@ app.put('/api/company', auth, requireAdministrator, async (request, response) =>
     if (body.zip_code && zipCode.length !== 8) return response.status(400).json({ error: 'Se informar o CEP, use os 8 números válidos.' })
     if (body.state && !/^[A-Z]{2}$/.test(state)) return response.status(400).json({ error: 'Informe uma UF válida com duas letras.' })
     if (legalName.length > 180 || tradeName.length > 160 || email.length > 254 || String(body.phone || '').length > 32 || String(body.segment || '').length > 100) return response.status(400).json({ error: 'Um ou mais campos excedem o tamanho permitido.' })
+    const documentKeys = Array.isArray(body.admission_document_keys) ? [...new Set(body.admission_document_keys.map(String))] : []
+    if (documentKeys.some((key) => !admissionDocumentKeys.has(key))) return response.status(400).json({ error: 'Um ou mais modelos de admissão selecionados são inválidos.' })
+    const logoDataUrl = body.admission_logo_data_url === undefined ? null : String(body.admission_logo_data_url || '')
+    if (logoDataUrl && (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(logoDataUrl) || Buffer.byteLength(logoDataUrl, 'utf8') > 1400000)) return response.status(400).json({ error: 'Envie a logo em PNG ou JPG com até 1 MB.' })
+    if (logoDataUrl === '') return response.status(400).json({ error: 'A logo enviada está vazia. Envie PNG ou JPG com até 1 MB.' })
+    const salaryBankName = String(body.salary_bank_name || '').trim().slice(0, 120) || null
+    const reimbursement = ['dinner', 'lunch', 'breakfast'].map((key) => body[`reimbursement_${key}`] === '' || body[`reimbursement_${key}`] === null || body[`reimbursement_${key}`] === undefined ? null : Number(body[`reimbursement_${key}`]))
+    if (reimbursement.some((value) => value !== null && (!Number.isFinite(value) || value < 0 || value > 100000))) return response.status(400).json({ error: 'Confira os valores de reembolso informados.' })
+    if (documentKeys.includes('conta_salario') && !salaryBankName) return response.status(400).json({ error: 'Informe o banco da conta salário para habilitar esse documento.' })
+    if (documentKeys.includes('reembolso') && reimbursement.some((value) => value === null)) return response.status(400).json({ error: 'Informe os três valores de reembolso para habilitar esse documento.' })
     const companies = await db.all('SELECT id, cnpj FROM companies WHERE id <> ? AND cnpj IS NOT NULL', [request.user.company_id])
     if (companies.some((company) => normalizeCnpj(company.cnpj) === cnpj)) return response.status(409).json({ error: 'Este CNPJ já está cadastrado em outra empresa Nexora.' })
     const previous = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website FROM companies WHERE id = ?', [request.user.company_id])
     if (!previous) return response.status(404).json({ error: 'Empresa não encontrada.' })
-    await db.run('UPDATE companies SET legal_name = ?, trade_name = ?, cnpj = ?, email = ?, phone = ?, segment = ?, zip_code = ?, address = ?, address_number = ?, complement = ?, district = ?, city = ?, state = ?, website = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [legalName, tradeName, cnpj, email, String(body.phone || '').trim() || null, String(body.segment || '').trim() || null, zipCode || null, String(body.address || '').trim() || null, String(body.address_number || '').trim() || null, String(body.complement || '').trim() || null, String(body.district || '').trim() || null, String(body.city || '').trim() || null, state || null, String(body.website || '').trim() || null, request.user.company_id])
-    const updated = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website FROM companies WHERE id = ?', [request.user.company_id])
-    await audit(request.user, 'ATUALIZAR_CADASTRO_EMPRESA', 'EMPRESA', request.user.company_id, previous, updated)
+    await db.run('UPDATE companies SET legal_name = ?, trade_name = ?, cnpj = ?, email = ?, phone = ?, segment = ?, zip_code = ?, address = ?, address_number = ?, complement = ?, district = ?, city = ?, state = ?, website = ?, admission_logo_data_url = COALESCE(?, admission_logo_data_url), admission_document_keys = ?, salary_bank_name = ?, reimbursement_dinner = ?, reimbursement_lunch = ?, reimbursement_breakfast = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [legalName, tradeName, cnpj, email, String(body.phone || '').trim() || null, String(body.segment || '').trim() || null, zipCode || null, String(body.address || '').trim() || null, String(body.address_number || '').trim() || null, String(body.complement || '').trim() || null, String(body.district || '').trim() || null, String(body.city || '').trim() || null, state || null, String(body.website || '').trim() || null, logoDataUrl, JSON.stringify(documentKeys), salaryBankName, ...reimbursement, request.user.company_id])
+    const updated = await db.get('SELECT id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website, admission_logo_data_url, admission_document_keys, salary_bank_name, reimbursement_dinner, reimbursement_lunch, reimbursement_breakfast FROM companies WHERE id = ?', [request.user.company_id])
+    updated.admission_document_keys = documentKeys
+    const auditPrevious = { ...previous, admission_document_keys: null, admission_logo_data_url: Boolean(request.body?.admission_logo_data_url) }
+    const auditUpdated = { ...updated, admission_logo_data_url: Boolean(updated.admission_logo_data_url) }
+    await audit(request.user, 'ATUALIZAR_CADASTRO_EMPRESA', 'EMPRESA', request.user.company_id, auditPrevious, auditUpdated)
     response.json(updated)
   } catch (error) { if (error.code === '23505' || error.message.includes('idx_companies_cnpj_unique') || error.message.includes('companies.cnpj')) return response.status(409).json({ error: 'Este CNPJ já está cadastrado em outra empresa Nexora.' }); errorResponse(response, error) }
 })
