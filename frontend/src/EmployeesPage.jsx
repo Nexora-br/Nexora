@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, BriefcaseBusiness, CalendarDays, ChevronRight, Download, FileText, Folder, FolderPlus, Pencil, Plus, Search, ShieldCheck, Trash2, UserRound, UsersRound, X } from 'lucide-react'
 import { API_URL } from './apiConfig'
-import { AdmissionDocumentChoices } from './admissionDocuments'
+import { AdmissionDocumentChoices } from './admissionDocuments.jsx'
 
 const categories = [
   ['CERTIFICADO', 'Certificado'], ['ASO', 'ASO'], ['FICHA_ADMISSAO', 'Ficha de admissão'],

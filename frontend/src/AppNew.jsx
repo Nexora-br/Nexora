@@ -19,7 +19,7 @@ import { TeamsPage } from './TeamsPage'
 import { SubscriptionPage } from './SubscriptionPage'
 import { API_URL } from './apiConfig'
 import { isValidCnpj, normalizeCnpj, useBusinessAutofill } from './businessLookups'
-import { AdmissionDocumentChoices, fileAsDataUrl } from './admissionDocuments'
+import { AdmissionDocumentChoices, fileAsDataUrl } from './admissionDocuments.jsx'
 
 const BRAZIL_STATES = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
 const LOGO_URL = `${import.meta.env.BASE_URL}logo_sem_fundo.png`

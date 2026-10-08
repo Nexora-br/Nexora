@@ -3,7 +3,7 @@ import { Check, Pencil, Plus, RefreshCw, ShieldCheck, UserRound, X } from 'lucid
 import './AppNew.css'
 import { API_URL } from './apiConfig'
 import { useBusinessAutofill } from './businessLookups'
-import { AdmissionDocumentChoices, fileAsDataUrl } from './admissionDocuments'
+import { AdmissionDocumentChoices, fileAsDataUrl } from './admissionDocuments.jsx'
 
 const actionLabels = { view: 'Visualizar', create: 'Criar', edit: 'Editar', delete: 'Excluir', archive: 'Arquivar', approve: 'Aprovar', pay: 'Pagar', receive: 'Receber', export: 'Exportar', upload: 'Anexar', download: 'Baixar' }
 
