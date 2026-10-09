@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Eye, X } from 'lucide-react'
 import { API_URL } from './apiConfig'
 
@@ -42,7 +43,7 @@ export function AdmissionDocumentChoices({ selected = [], name, disabled = false
 
   return <>
     <div className="admission-document-options">{choices.map(([key, label]) => <div key={key} className="admission-document-choice"><label className="check-label"><input type="checkbox" name={name} value={key} defaultChecked={selected.includes(key)} disabled={disabled} /><span>{label}</span></label><button type="button" className="admission-preview-button" onClick={() => void openPreview(key, label)} disabled={Boolean(preview?.loading)}><Eye size={14} /> Visualizar</button></div>)}</div>
-    {preview && <div className="modal-layer admission-preview-layer" onClick={closePreview}><section className="modal-card admission-preview-modal" role="dialog" aria-modal="true" aria-labelledby="admission-preview-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-x" aria-label="Fechar prévia" onClick={closePreview}><X size={18} /></button><span className="section-kicker">PRÉVIA DO DOCUMENTO</span><h2 id="admission-preview-title">{preview.label}</h2><p>Exemplo preenchido com dados fictícios; os dados reais são aplicados na admissão.</p>{preview.loading ? <div className="admission-preview-state">Carregando prévia...</div> : preview.error ? <div className="form-error" role="alert">{preview.error}</div> : <iframe title={`Prévia: ${preview.label}`} src={preview.url} />}</section></div>}
+    {preview && createPortal(<div className="modal-layer admission-preview-layer" onClick={closePreview}><section className="modal-card admission-preview-modal" role="dialog" aria-modal="true" aria-labelledby="admission-preview-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-x" aria-label="Fechar prévia" onClick={closePreview}><X size={18} /></button><span className="section-kicker">PRÉVIA DO DOCUMENTO</span><h2 id="admission-preview-title">{preview.label}</h2><p>Exemplo preenchido com dados fictícios; os dados reais são aplicados na admissão.</p>{preview.loading ? <div className="admission-preview-state">Carregando prévia...</div> : preview.error ? <div className="form-error" role="alert">{preview.error}</div> : <iframe title={`Prévia: ${preview.label}`} src={preview.url} />}</section></div>, document.body)}
   </>
 }
 
