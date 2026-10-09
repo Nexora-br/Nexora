@@ -14,21 +14,21 @@ const defaultOrigins = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3000',
 ]
+const productionOrigins = ['https://nexora-br.github.io']
 
 const config = {
   isProduction: process.env.NODE_ENV === 'production',
   port: Number(process.env.PORT || 3333),
   frontendOrigin: process.env.FRONTEND_ORIGIN || '',
-  frontendOrigins: [...new Set([...defaultOrigins, ...normalizeList(process.env.FRONTEND_ORIGIN)])],
   storagePath: process.env.NEXORA_STORAGE_PATH || path.join(__dirname, 'storage'),
   isCloudEnvironment: Boolean(process.env.RENDER || process.env.VERCEL || process.env.DATABASE_URL || process.env.SUPABASE_URL),
   databaseUrl: process.env.DATABASE_URL || null,
 }
 
 function buildCorsOptions({ frontendOrigin = config.frontendOrigin, isProduction = config.isProduction } = {}) {
-  const requestedOrigins = frontendOrigin
-    ? [frontendOrigin, ...config.frontendOrigins]
-    : config.frontendOrigins
+  const requestedOrigins = isProduction
+    ? [...productionOrigins, ...normalizeList(frontendOrigin)]
+    : [...defaultOrigins, ...normalizeList(frontendOrigin)]
 
   const allowedOrigins = [...new Set(requestedOrigins.filter(Boolean))]
 

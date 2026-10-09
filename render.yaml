@@ -16,7 +16,7 @@ services:
       - key: NEXORA_ENABLE_SIMULATED_BILLING
         value: true
       - key: FRONTEND_ORIGIN
-        value: https://nexora-navy-seven.vercel.app
+        value: https://nexora-br.github.io
       - key: NEXORA_JWT_SECRET
         generateValue: true
       - key: DATABASE_URL
