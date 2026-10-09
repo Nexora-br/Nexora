@@ -67,7 +67,7 @@ function createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, require
       const project = await ownedProject(request.portalUser, request.params.projectId)
       if (!project) return response.status(404).json({ error: 'Obra não encontrada.' })
       const [diaries, documents, stages] = await Promise.all([
-        db.all("SELECT id, entry_date, entry_type, activities, photos, pdf_name, pdf_size FROM work_diaries WHERE project_id = ? AND company_id = ? AND portal_visible = 1 ORDER BY entry_date DESC", [project.id, request.portalUser.company_id]),
+        db.all("SELECT d.id, d.entry_date, d.entry_type, d.activities, d.photos, d.pdf_name, d.pdf_size FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? AND p.client_id = ? AND d.portal_visible = 1 ORDER BY d.entry_date DESC", [project.id, request.portalUser.company_id, request.portalUser.client_id]),
         db.all("SELECT id, name, category, size, mime_type, created_at FROM documents WHERE portal_project_id = ? AND company_id = ? AND portal_visible = 1 AND archived = 0 ORDER BY created_at DESC", [project.id, request.portalUser.company_id]),
         db.all('SELECT id, name, progress, status, start_date, end_date FROM project_stages WHERE project_id = ? AND company_id = ? ORDER BY created_at', [project.id, request.portalUser.company_id]),
       ])
