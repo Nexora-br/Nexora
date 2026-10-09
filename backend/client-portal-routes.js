@@ -121,12 +121,12 @@ function createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, require
   })
 
   // Internal company staff manage client portal access through normal client permissions.
-  router.get('/api/clients/:clientId/portal-users', auth, requireRole(...portalManagers), async (request, response) => {
+  router.get('/api/clients/:clientId/portal-users', auth, requireRole('ADMINISTRADOR'), async (request, response) => {
     const client = await db.get('SELECT id FROM clients WHERE id = ? AND company_id = ?', [request.params.clientId, request.user.company_id])
     if (!client) return response.status(404).json({ error: 'Cliente não encontrado.' })
     response.json(await db.all('SELECT id, name, email, status, created_at FROM client_portal_users WHERE client_id = ? AND company_id = ? ORDER BY created_at DESC', [client.id, request.user.company_id]))
   })
-  router.post('/api/clients/:clientId/portal-users', auth, requireRole(...portalManagers), async (request, response) => {
+  router.post('/api/clients/:clientId/portal-users', auth, requireRole('ADMINISTRADOR'), async (request, response) => {
     try {
       const client = await db.get('SELECT id FROM clients WHERE id = ? AND company_id = ? AND archived = 0', [request.params.clientId, request.user.company_id])
       const name = String(request.body?.name || '').trim().slice(0, 120)
@@ -143,7 +143,7 @@ function createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, require
       response.status(error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505' ? 409 : 500).json({ error: error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === '23505' ? 'Este e-mail já possui acesso para este cliente.' : 'Não foi possível criar o acesso.' })
     }
   })
-  router.patch('/api/clients/:clientId/portal-users/:userId', auth, requireRole(...portalManagers), async (request, response) => {
+  router.patch('/api/clients/:clientId/portal-users/:userId', auth, requireRole('ADMINISTRADOR'), async (request, response) => {
     const user = await db.get('SELECT * FROM client_portal_users WHERE id = ? AND client_id = ? AND company_id = ?', [request.params.userId, request.params.clientId, request.user.company_id])
     if (!user) return response.status(404).json({ error: 'Acesso não encontrado.' })
     const status = request.body?.status === 'INATIVO' ? 'INATIVO' : 'ATIVO'
