@@ -146,7 +146,7 @@ function createWorkDiaryRoutes({ db, auth, requirePermission, audit, uploadRoot,
       const projectId = String(request.query.project_id || '')
       if (!projectId) return response.status(400).json({ error: 'Selecione uma obra para consultar o diário.' })
       if (!await getProject(projectId, request.user.company_id)) return response.status(404).json({ error: 'Obra não encontrada.' })
-      const rows = await db.all('SELECT d.id, d.project_id, d.author_id, d.entry_type, d.entry_date, d.weather, d.worker_count, d.activities, d.observations, d.pdf_name, d.pdf_size, d.created_at, d.updated_at, u.name AS author_name FROM work_diaries d JOIN users u ON u.id = d.author_id AND u.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? ORDER BY d.entry_date DESC, d.created_at DESC', [projectId, request.user.company_id])
+      const rows = await db.all('SELECT d.id, d.project_id, d.author_id, d.entry_type, d.entry_date, d.weather, d.worker_count, d.activities, d.observations, d.pdf_name, d.pdf_size, d.portal_visible, d.created_at, d.updated_at, u.name AS author_name FROM work_diaries d JOIN users u ON u.id = d.author_id AND u.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? ORDER BY d.entry_date DESC, d.created_at DESC', [projectId, request.user.company_id])
       response.json(rows)
     } catch (error) { response.status(500).json({ error: 'Não foi possível carregar os diários desta obra.' }) }
   }, 'view'))
