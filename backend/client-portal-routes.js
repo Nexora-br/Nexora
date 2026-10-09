@@ -67,14 +67,16 @@ function createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, require
       const project = await ownedProject(request.portalUser, request.params.projectId)
       if (!project) return response.status(404).json({ error: 'Obra não encontrada.' })
       const [diaries, documents, stages] = await Promise.all([
-        db.all("SELECT d.id, d.entry_date, d.entry_type, d.activities, d.photos, d.pdf_name, d.pdf_size FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? AND p.client_id = ? ORDER BY d.entry_date DESC", [project.id, request.portalUser.company_id, request.portalUser.client_id]),
+        db.all("SELECT d.id, d.entry_date, d.entry_type, d.weather, d.worker_count, d.equipment_used, d.equipment_notes, d.activities, d.occurrences, d.materials_received, d.observations, d.photos, d.pdf_name, d.pdf_size FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? AND p.client_id = ? ORDER BY d.entry_date DESC", [project.id, request.portalUser.company_id, request.portalUser.client_id]),
         db.all("SELECT id, name, category, size, mime_type, created_at FROM documents WHERE portal_project_id = ? AND company_id = ? AND portal_visible = 1 AND archived = 0 ORDER BY created_at DESC", [project.id, request.portalUser.company_id]),
         db.all('SELECT id, name, progress, status, start_date, end_date FROM project_stages WHERE project_id = ? AND company_id = ? ORDER BY created_at', [project.id, request.portalUser.company_id]),
       ])
       const safeDiaries = diaries.map((entry) => {
         let photos = []
         try { photos = (typeof entry.photos === 'string' ? JSON.parse(entry.photos || '[]') : entry.photos || []).map((photo, index) => ({ id: String(index), name: path.basename(photo.name || `Foto ${index + 1}`), url: `/api/client-portal/projects/${project.id}/diaries/${entry.id}/photos/${index}` })) } catch {}
-        return { id: entry.id, entry_date: entry.entry_date, activities: entry.activities, photos, has_pdf: entry.entry_type === 'PDF' && Boolean(entry.pdf_name), pdf_name: entry.entry_type === 'PDF' ? entry.pdf_name : null }
+        let equipmentUsed = []
+        try { equipmentUsed = (typeof entry.equipment_used === 'string' ? JSON.parse(entry.equipment_used || '[]') : entry.equipment_used || []).map((item) => ({ name: String(item?.name || '').slice(0, 160) })).filter((item) => item.name) } catch {}
+        return { id: entry.id, entry_date: entry.entry_date, entry_type: entry.entry_type, weather: entry.weather, worker_count: entry.worker_count, equipment_used: equipmentUsed, equipment_notes: entry.equipment_notes, activities: entry.activities, occurrences: entry.occurrences, materials_received: entry.materials_received, observations: entry.observations, photos, has_pdf: entry.entry_type === 'PDF' && Boolean(entry.pdf_name), pdf_name: entry.entry_type === 'PDF' ? entry.pdf_name : null }
       })
       response.json({ project, stages, diaries: safeDiaries, documents })
     } catch { response.status(500).json({ error: 'Não foi possível carregar esta obra.' }) }
