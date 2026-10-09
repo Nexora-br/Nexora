@@ -77,17 +77,6 @@ function WorkDiaryPage({ session, can, canEquipment, notify }) {
     } catch (error) { notify(error.message || 'Não foi possível excluir o registro.') }
   }
 
-  async function togglePortalVisibility(entry) {
-    const visible = !entry.portal_visible
-    try {
-      const response = await fetch(`${API_URL}/work-diaries/${entry.id}/portal-visibility`, { method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify({ visible }) })
-      const payload = await response.json()
-      if (!response.ok) throw new Error(payload.error || 'Não foi possível alterar a liberação.')
-      notify(visible ? 'Diário liberado no portal do cliente.' : 'Diário removido do portal.')
-      await loadEntries()
-    } catch (error) { notify(error.message || 'Não foi possível alterar a liberação.') }
-  }
-
   async function openFile(entry, kind, photoId) {
     try {
       const query = new URLSearchParams({ kind, inline: '0' })
@@ -115,7 +104,7 @@ function WorkDiaryPage({ session, can, canEquipment, notify }) {
       {state.loading ? <DataState message="CARREGANDO DIÁRIO DE OBRA..." /> : state.error ? <DataState message={state.error} action={<button className="blue-button" onClick={() => projects.length ? loadEntries() : loadProjects().catch((error) => setState({ loading: false, error: error.message }))}><RefreshCw size={15} /> Tentar novamente</button>} /> : !projectId || !projects.length ? <EmptyState>Nenhuma obra disponível para registrar o diário.</EmptyState> : !entries.length ? <EmptyState>Nenhum registro de diário encontrado.</EmptyState> : <div className="work-diary-list">{entries.map((entry) => <article className="work-diary-row" key={entry.id}>
         <span className={`work-diary-type-icon ${entry.entry_type === 'PDF' ? 'pdf' : 'structured'}`}>{entry.entry_type === 'PDF' ? <FileCheck2 size={18} /> : <BookOpen size={18} />}</span>
         <div className="work-diary-row-main"><div className="work-diary-row-title"><strong>{dateLabel(entry.entry_date)}</strong><span className={`work-diary-badge ${entry.entry_type === 'PDF' ? 'pdf' : 'structured'}`}>{entry.entry_type === 'PDF' ? 'PDF anexado' : 'Criado no sistema'}</span></div><p>{entry.entry_type === 'PDF' ? entry.pdf_name || entry.observations || 'Diário em PDF anexado.' : shortText(entry.activities) || 'Diário criado no sistema.'}</p><small>{entry.author_name || 'Usuário'}{entry.weather ? ` · ${weatherLabel(entry.weather)}` : ''}</small></div>
-        <div className="work-diary-row-actions">{['ADMINISTRADOR', 'DIRETOR', 'GERENTE', 'GESTOR', 'SUPERVISOR'].includes(session.role) && <button className="table-action" onClick={() => togglePortalVisibility(entry)}>{entry.portal_visible ? 'Remover do portal' : 'Liberar no portal'}</button>}{entry.portal_visible ? <span className="work-diary-badge structured">Visível ao cliente</span> : null}<button className="table-action" onClick={() => openDetail(entry)}><Eye size={14} /> Visualizar</button>{can('work_diary', 'edit') && <button className="table-action" onClick={() => setModal({ entry })}><Pencil size={14} /> Editar</button>}{can('work_diary', 'delete') && <button className="table-action danger" onClick={() => removeEntry(entry)}><Trash2 size={14} /> Excluir</button>}</div>
+        <div className="work-diary-row-actions"><button className="table-action" onClick={() => openDetail(entry)}><Eye size={14} /> Visualizar</button>{can('work_diary', 'edit') && <button className="table-action" onClick={() => setModal({ entry })}><Pencil size={14} /> Editar</button>}{can('work_diary', 'delete') && <button className="table-action danger" onClick={() => removeEntry(entry)}><Trash2 size={14} /> Excluir</button>}</div>
       </article>)}</div>}
     </div>
     {modal && <DiaryModal key={modal.entry?.id || 'new'} entry={modal.entry} project={projects.find((item) => item.id === projectId)} equipments={equipments} headers={headers} onClose={() => setModal(null)} onSave={saveDiary} notify={notify} />}

@@ -67,7 +67,7 @@ function createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, require
       const project = await ownedProject(request.portalUser, request.params.projectId)
       if (!project) return response.status(404).json({ error: 'Obra não encontrada.' })
       const [diaries, documents, stages] = await Promise.all([
-        db.all("SELECT d.id, d.entry_date, d.entry_type, d.activities, d.photos, d.pdf_name, d.pdf_size FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? AND p.client_id = ? AND d.portal_visible = 1 ORDER BY d.entry_date DESC", [project.id, request.portalUser.company_id, request.portalUser.client_id]),
+        db.all("SELECT d.id, d.entry_date, d.entry_type, d.activities, d.photos, d.pdf_name, d.pdf_size FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.project_id = ? AND d.company_id = ? AND p.client_id = ? ORDER BY d.entry_date DESC", [project.id, request.portalUser.company_id, request.portalUser.client_id]),
         db.all("SELECT id, name, category, size, mime_type, created_at FROM documents WHERE portal_project_id = ? AND company_id = ? AND portal_visible = 1 AND archived = 0 ORDER BY created_at DESC", [project.id, request.portalUser.company_id]),
         db.all('SELECT id, name, progress, status, start_date, end_date FROM project_stages WHERE project_id = ? AND company_id = ? ORDER BY created_at', [project.id, request.portalUser.company_id]),
       ])
@@ -91,14 +91,14 @@ function createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, require
   router.get('/api/client-portal/projects/:projectId/diaries/:diaryId/pdf', portalAuth, async (request, response) => {
     const project = await ownedProject(request.portalUser, request.params.projectId)
     if (!project) return response.status(404).json({ error: 'Arquivo não encontrado.' })
-    const diary = await db.get('SELECT pdf_path, pdf_name FROM work_diaries WHERE id = ? AND project_id = ? AND company_id = ? AND portal_visible = 1 AND entry_type = ?', [request.params.diaryId, project.id, request.portalUser.company_id, 'PDF'])
+    const diary = await db.get('SELECT d.pdf_path, d.pdf_name FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.id = ? AND d.project_id = ? AND d.company_id = ? AND p.client_id = ? AND d.entry_type = ?', [request.params.diaryId, project.id, request.portalUser.company_id, request.portalUser.client_id, 'PDF'])
     if (!diary?.pdf_path) return response.status(404).json({ error: 'Arquivo não encontrado.' })
     return streamPrivateFile(response, diary.pdf_path, diary.pdf_name, 'application/pdf')
   })
   router.get('/api/client-portal/projects/:projectId/diaries/:diaryId/photos/:photoIndex', portalAuth, async (request, response) => {
     const project = await ownedProject(request.portalUser, request.params.projectId)
     if (!project) return response.status(404).json({ error: 'Foto não encontrada.' })
-    const diary = await db.get('SELECT photos FROM work_diaries WHERE id = ? AND project_id = ? AND company_id = ? AND portal_visible = 1', [request.params.diaryId, project.id, request.portalUser.company_id])
+    const diary = await db.get('SELECT d.photos FROM work_diaries d JOIN projects p ON p.id = d.project_id AND p.company_id = d.company_id WHERE d.id = ? AND d.project_id = ? AND d.company_id = ? AND p.client_id = ?', [request.params.diaryId, project.id, request.portalUser.company_id, request.portalUser.client_id])
     let photos = []
     try { photos = typeof diary?.photos === 'string' ? JSON.parse(diary.photos || '[]') : diary?.photos || [] } catch {}
     const photo = photos[Number(request.params.photoIndex)]
