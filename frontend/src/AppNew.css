@@ -269,6 +269,13 @@ button, input, select, textarea { font-family: inherit; }
 .nav-group { display:flex; flex:0 0 auto; flex-direction:column; gap:3px; padding:0 0 11px; margin:0 0 9px; border-bottom:1px solid rgba(144,190,208,.15); }
 .nav-group .nav-label { padding:0 12px 6px; color:#79a9bc; font-size:8px; letter-spacing:.14em; }
 .nav-group button { flex:0 0 auto; }
+.nav-group-collapsible { gap:0; padding-bottom:7px; margin-bottom:6px; }
+.nav-group-toggle { width:100%; min-height:32px; display:flex; align-items:center; justify-content:space-between; padding:5px 10px 5px 12px !important; border:0; border-radius:7px; background:transparent; cursor:pointer; }
+.nav-group-toggle:hover { background:rgba(255,255,255,.06) !important; }
+.nav-group-toggle .nav-label { padding:0; }
+.nav-group-toggle .nav-chevron { color:#79a9bc; transition:transform .2s ease; }
+.nav-group-toggle .nav-chevron.expanded { transform:rotate(180deg); }
+.nav-group-items { display:flex; flex-direction:column; gap:3px; padding-top:3px; }
 .nav-account-group { padding-bottom:0; margin-bottom:0; border-bottom:0; }
 .nav-account-group .nav-label { padding-top:2px; }
 .employee-privacy-note svg { flex:0 0 auto; color:#4287a2; }
