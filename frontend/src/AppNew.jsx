@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { motion, useReducedMotion } from 'motion/react'
 import {
   ArrowRight, BarChart3, Bell, Bot, CalendarDays, Check, ChevronDown, CircleHelp, FolderPlus,
   ClipboardList, CreditCard, Factory, FileText, Handshake, LayoutDashboard, Layers3,
@@ -365,15 +366,83 @@ function AppNew() {
 }
 
 function NexoraLandingPage({ onRestricted, onPortal, onSelectPlans }) {
+  const landingRef = useRef(null)
+  const prefersReducedMotion = useReducedMotion()
+
   useEffect(() => {
-    const items = document.querySelectorAll('.nexora-reveal')
-    if (!('IntersectionObserver' in window)) { items.forEach((item) => item.classList.add('is-visible')); return undefined }
-    const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
-      if (entry.isIntersecting) { entry.target.classList.add('is-visible'); observer.unobserve(entry.target) }
-    }), { threshold: 0.14 })
-    items.forEach((item) => observer.observe(item))
-    return () => observer.disconnect()
-  }, [])
+    const landing = landingRef.current
+    if (!landing) return undefined
+    const revealItems = landing.querySelectorAll('.nexora-reveal')
+    if (prefersReducedMotion) {
+      revealItems.forEach((item) => item.classList.add('is-visible'))
+      return undefined
+    }
+    let cancelled = false
+    let context
+    let observer
+    import('gsap').then(({ gsap }) => {
+      if (cancelled) return
+      context = gsap.context(() => {
+        gsap.timeline({ defaults: { ease: 'power3.out' } })
+          .from('.landing-header', { y: -18, autoAlpha: 0, duration: 0.65 })
+          .from('.landing-eyebrow', { y: 18, autoAlpha: 0, duration: 0.55 }, '-=0.28')
+          .from('.landing-hero h1', { y: 28, autoAlpha: 0, duration: 0.72 }, '-=0.2')
+          .from('.landing-hero-copy > p', { y: 18, autoAlpha: 0, duration: 0.55 }, '-=0.38')
+          .from('.landing-hero-actions > *', { y: 14, autoAlpha: 0, duration: 0.48, stagger: 0.1 }, '-=0.28')
+          .from('.landing-proof', { y: 12, autoAlpha: 0, duration: 0.45 }, '-=0.25')
+          .from('.landing-visual', { scale: 0.96, autoAlpha: 0, duration: 0.85 }, '-=0.65')
+          .from('.landing-float-card', { y: 16, autoAlpha: 0, duration: 0.55, stagger: 0.14 }, '-=0.42')
+
+        gsap.to('.landing-float-card', { y: -7, duration: 3.2, ease: 'sine.inOut', yoyo: true, repeat: -1, stagger: 0.5, delay: 2.5 })
+        gsap.to('.landing-spark', { scale: 1.16, autoAlpha: 0.7, duration: 1.8, ease: 'sine.inOut', yoyo: true, repeat: -1, stagger: 0.65 })
+        gsap.to('.ring-a', { rotation: 360, duration: 42, ease: 'none', repeat: -1 })
+        gsap.to('.ring-b', { rotation: -360, duration: 34, ease: 'none', repeat: -1 })
+        gsap.to('.purpose-center', { y: -6, duration: 3.4, ease: 'sine.inOut', yoyo: true, repeat: -1 })
+      }, landing)
+
+      if (!('IntersectionObserver' in window)) {
+        revealItems.forEach((item) => {
+          item.classList.add('is-visible')
+          context.add(() => gsap.from(item, { y: 24, autoAlpha: 0, duration: 0.7, ease: 'power2.out' }))
+        })
+        return
+      }
+      observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        entry.target.classList.add('is-visible')
+        context.add(() => gsap.from(entry.target, { y: 24, autoAlpha: 0, duration: 0.7, ease: 'power2.out' }))
+        observer.unobserve(entry.target)
+      }), { threshold: 0.14 })
+      revealItems.forEach((item) => observer.observe(item))
+    }).catch(() => revealItems.forEach((item) => item.classList.add('is-visible')))
+    return () => { cancelled = true; observer?.disconnect(); context?.revert() }
+  }, [prefersReducedMotion])
+
+  useEffect(() => {
+    const landing = landingRef.current
+    if (!landing || prefersReducedMotion || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return undefined
+    let cancelled = false
+    const cleanups = []
+    import('animejs').then(({ animate }) => {
+      if (cancelled) return
+      const buttons = landing.querySelectorAll('.landing-primary, .landing-text-link, .landing-restricted, .landing-portal-link, .landing-plan-link')
+      buttons.forEach((button) => {
+        const arrow = button.querySelector('svg')
+        const enter = () => {
+          animate(button, { scale: 1.035, duration: 230, ease: 'outBack(1.8)' })
+          if (arrow) animate(arrow, { x: 4, duration: 220, ease: 'out(3)' })
+        }
+        const leave = () => {
+          animate(button, { scale: 1, duration: 280, ease: 'out(3)' })
+          if (arrow) animate(arrow, { x: 0, duration: 260, ease: 'out(3)' })
+        }
+        button.addEventListener('pointerenter', enter)
+        button.addEventListener('pointerleave', leave)
+        cleanups.push(() => { button.removeEventListener('pointerenter', enter); button.removeEventListener('pointerleave', leave) })
+      })
+    })
+    return () => { cancelled = true; cleanups.forEach((remove) => remove()) }
+  }, [prefersReducedMotion])
 
   const benefits = [
     { icon: ClipboardList, title: 'Tudo no mesmo fluxo', text: 'Projetos, tarefas, agenda, equipes e documentos ficam conectados em uma única rotina.' },
@@ -385,7 +454,7 @@ function NexoraLandingPage({ onRestricted, onPortal, onSelectPlans }) {
     { icon: Package, label: 'Estoque e compras' }, { icon: WalletCards, label: 'Financeiro' },
   ]
 
-  return <div className="nexora-landing">
+  return <div className="nexora-landing" ref={landingRef}>
     <header className="landing-header">
       <a className="landing-brand" href="#inicio" aria-label="Nexora, início"><img src={LOGO_URL} alt="Nexora" /></a>
       <nav className="landing-nav" aria-label="Navegação principal"><a href="#sobre">A Nexora</a><a href="#beneficios">Benefícios</a><a href="#historia">Nossa história</a><button className="landing-plan-link" onClick={onSelectPlans}>Planos</button></nav>
@@ -424,7 +493,7 @@ function NexoraLandingPage({ onRestricted, onPortal, onSelectPlans }) {
 
       <section className="landing-section landing-benefits" id="beneficios">
         <div className="landing-section-intro nexora-reveal"><span className="landing-section-kicker">POR QUE USAR A NEXORA</span><h2>Menos ruído na rotina.<br /><em>Mais espaço para avançar.</em></h2><p>Uma visão integrada ajuda a transformar informação dispersa em ação coordenada.</p></div>
-        <div className="landing-benefit-grid">{benefits.map(({ icon: Icon, title, text }, index) => <article className="landing-benefit-card nexora-reveal" key={title} style={{ '--reveal-delay': `${index * 120}ms` }}><span className="landing-benefit-icon"><Icon size={21} /></span><span className="landing-card-number">0{index + 1}</span><h3>{title}</h3><p>{text}</p><span className="landing-card-line" /></article>)}</div>
+        <div className="landing-benefit-grid">{benefits.map(({ icon: Icon, title, text }, index) => <motion.article className="landing-benefit-card" key={title} initial={prefersReducedMotion ? false : { opacity: 0, y: 22 }} whileInView={prefersReducedMotion ? undefined : { opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.2 }} transition={{ duration: prefersReducedMotion ? 0 : 0.6, delay: prefersReducedMotion ? 0 : index * 0.1, ease: [0.22, 1, 0.36, 1] }} whileHover={prefersReducedMotion ? undefined : { y: -6, transition: { duration: 0.2 } }}><span className="landing-benefit-icon"><Icon size={21} /></span><span className="landing-card-number">0{index + 1}</span><h3>{title}</h3><p>{text}</p><span className="landing-card-line" /></motion.article>)}</div>
       </section>
 
       <section className="landing-purpose" id="objetivo">

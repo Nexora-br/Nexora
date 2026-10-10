@@ -12,7 +12,10 @@
   },
   "dependencies": {
     "@heyputer/puter.js": "^2.6.3",
+    "animejs": "^4.5.0",
+    "gsap": "^3.15.0",
     "lucide-react": "^1.47.0",
+    "motion": "^14.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
