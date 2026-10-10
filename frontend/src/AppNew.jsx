@@ -380,8 +380,9 @@ function NexoraLandingPage({ onRestricted, onPortal, onSelectPlans }) {
     let cancelled = false
     let context
     let observer
-    import('gsap').then(({ gsap }) => {
+    Promise.all([import('gsap'), import('gsap/ScrollTrigger')]).then(([{ gsap }, { ScrollTrigger }]) => {
       if (cancelled) return
+      gsap.registerPlugin(ScrollTrigger)
       context = gsap.context(() => {
         gsap.timeline({ defaults: { ease: 'power3.out' } })
           .from('.landing-header', { y: -18, autoAlpha: 0, duration: 0.65 })
@@ -398,6 +399,20 @@ function NexoraLandingPage({ onRestricted, onPortal, onSelectPlans }) {
         gsap.to('.ring-a', { rotation: 360, duration: 42, ease: 'none', repeat: -1 })
         gsap.to('.ring-b', { rotation: -360, duration: 34, ease: 'none', repeat: -1 })
         gsap.to('.purpose-center', { y: -6, duration: 3.4, ease: 'sine.inOut', yoyo: true, repeat: -1 })
+
+        if (window.matchMedia('(min-width: 901px)').matches) {
+          const story = gsap.timeline({ scrollTrigger: { trigger: '.landing-product-story', start: 'top top', end: '+=1900', pin: true, scrub: 0.9, anticipatePin: 1, invalidateOnRefresh: true } })
+          story.to('.landing-story-progress-track i', { scaleX: 1, duration: 3, ease: 'none' }, 0)
+            .to('.landing-story-count', { onUpdate() { this.targets()[0].textContent = String(Math.min(3, Math.floor(this.progress() * 3) + 1)).padStart(2, '0') }, duration: 3 }, 0)
+            .to('.landing-story-caption:nth-child(1)', { autoAlpha: 0, y: -22, duration: 0.22 }, 0.82)
+            .fromTo('.landing-story-caption:nth-child(2)', { autoAlpha: 0, y: 22 }, { autoAlpha: 1, y: 0, duration: 0.22 }, 0.9)
+            .to('.product-view-planning', { autoAlpha: 0, scale: 0.96, y: -10, duration: 0.24 }, 0.83)
+            .fromTo('.product-view-field', { autoAlpha: 0, scale: 1.035, y: 14 }, { autoAlpha: 1, scale: 1, y: 0, duration: 0.32 }, 0.93)
+            .to('.landing-story-caption:nth-child(2)', { autoAlpha: 0, y: -22, duration: 0.22 }, 1.82)
+            .fromTo('.landing-story-caption:nth-child(3)', { autoAlpha: 0, y: 22 }, { autoAlpha: 1, y: 0, duration: 0.22 }, 1.9)
+            .to('.product-view-field', { autoAlpha: 0, scale: 0.96, y: -10, duration: 0.24 }, 1.83)
+            .fromTo('.product-view-control', { autoAlpha: 0, scale: 1.035, y: 14 }, { autoAlpha: 1, scale: 1, y: 0, duration: 0.32 }, 1.93)
+        }
       }, landing)
 
       if (!('IntersectionObserver' in window)) {
@@ -489,6 +504,41 @@ function NexoraLandingPage({ onRestricted, onPortal, onSelectPlans }) {
 
       <section className="landing-modules" id="modulos" aria-label="Áreas conectadas na Nexora">
         <div className="landing-modules-track">{[...modules, ...modules].map(({ icon: Icon, label }, index) => <div className="landing-module-chip" key={`${label}-${index}`}><Icon size={17} />{label}</div>)}</div>
+      </section>
+
+      <section className="landing-product-story" aria-label="Como a Nexora conecta cada etapa da operação">
+        <div className="landing-product-stage">
+          <div className="landing-product-copy">
+            <span className="landing-section-kicker"><span className="story-live-dot" /> UMA OPERAÇÃO. CADA ETAPA À VISTA.</span>
+            <div className="landing-story-captions">
+              <article className="landing-story-caption"><span>01 / PLANEJAMENTO</span><h2>Comece com<br /><em>o plano inteiro.</em></h2><p>Projetos, responsáveis e prazos em uma visão que aproxima a decisão do trabalho em campo.</p></article>
+              <article className="landing-story-caption"><span>02 / ACOMPANHAMENTO</span><h2>O campo acontece.<br /><em>A informação chega.</em></h2><p>Diários, equipes e atividades mantêm cada pessoa conectada ao que está acontecendo agora.</p></article>
+              <article className="landing-story-caption"><span>03 / CONTROLE</span><h2>Da primeira tarefa<br /><em>à última entrega.</em></h2><p>Materiais, custos e andamento se encontram para sua empresa seguir com mais segurança.</p></article>
+            </div>
+            <div className="landing-story-progress" aria-hidden="true"><span className="landing-story-progress-track"><i /></span><span className="landing-story-count">01 <small>/ 03</small></span></div>
+          </div>
+
+          <div className="landing-product-visual" aria-label="Prévia ilustrativa do painel da Nexora">
+            <div className="landing-product-halo" />
+            <div className="landing-product-window">
+              <div className="product-window-bar"><div className="product-window-brand"><span>N</span> nexora</div><div className="product-window-search">⌕ <span>Buscar na operação</span></div><div className="product-window-avatar">DR</div></div>
+              <div className="product-window-body">
+                <aside className="product-window-sidebar"><span className="product-side-active"><i /> Visão geral</span><span><i /> Projetos</span><span><i /> Diário de obra</span><span><i /> Equipes</span><span><i /> Suprimentos</span><div className="product-sidebar-company"><b>HA</b><span>Horizonte Agro<small>Plano profissional</small></span></div></aside>
+                <div className="product-window-canvas">
+                  <div className="product-canvas-heading"><div><small>PAINEL DE OPERAÇÕES</small><strong>O que acontece hoje <span>✳</span></strong><p>Acompanhe o que está acontecendo na sua operação.</p></div><button>+ Novo projeto</button></div>
+                  <div className="product-metric-row"><div><small>PROJETOS ATIVOS</small><b>08</b><i>+ 2 este mês</i></div><div><small>EM CAMPO HOJE</small><b>24</b><i>em 3 obras</i></div><div><small>ETAPAS CONCLUÍDAS</small><b>76<span>%</span></b><i>no prazo</i></div></div>
+                  <div className="product-view-stack">
+                    <div className="product-view product-view-planning"><div className="product-view-heading"><b>Obras em andamento</b><span>Ver todos&nbsp; →</span></div><div className="product-project-row"><span className="project-icon amber">01</span><span><b>Silo Fazenda Horizonte</b><small>Montagem · Rio Verde, GO</small></span><i>EM EXECUÇÃO</i></div><div className="product-project-row"><span className="project-icon blue">02</span><span><b>Unidade Santa Luzia</b><small>Fundação · Jataí, GO</small></span><i>NO PRAZO</i></div><div className="product-project-row"><span className="project-icon green">03</span><span><b>Secador Vale Verde</b><small>Instalação · Mineiros, GO</small></span><i>EM EXECUÇÃO</i></div></div>
+                    <div className="product-view product-view-field"><div className="product-view-heading"><b>Diário de obra <span>Hoje, 09:42</span></b><span className="product-status-live"><i /> AO VIVO</span></div><div className="product-field-photo"><div className="field-silo-art"><span /><i /><b /></div><span className="field-photo-tag">FAZENDA HORIZONTE&nbsp; · &nbsp;RIO VERDE, GO</span></div><div className="product-field-footer"><span className="field-avatar-stack"><i>MA</i><i>JP</i><i>+6</i></span><span><b>Equipe de montagem</b><small>8 pessoas registraram atividade</small></span><span className="field-check">✓</span></div></div>
+                    <div className="product-view product-view-control"><div className="product-view-heading"><b>Materiais e orçamento</b><span>Atualizado agora</span></div><div className="product-budget"><div><small>ORÇAMENTO UTILIZADO</small><b>R$ 184.650 <span>de R$ 240.000</span></b></div><div className="product-budget-track"><i /></div><small>76% do orçamento planejado</small></div><div className="product-supply-row"><span className="supply-box-icon">▤</span><span><b>Estrutura metálica</b><small>Materiais recebidos na obra</small></span><i>Conferido ✓</i></div><div className="product-supply-row"><span className="supply-box-icon mint">↗</span><span><b>Próxima etapa</b><small>Montagem dos elevadores</small></span><i>Em 2 dias</i></div></div>
+                  </div>
+                  <div className="product-window-footer"><span><i /> Tudo sincronizado</span><span>Atualizado há poucos segundos</span></div>
+                </div>
+              </div>
+            </div>
+            <div className="product-float-note"><span>↗</span><div><b>Uma operação conectada</b><small>Do escritório ao campo</small></div></div>
+          </div>
+        </div>
       </section>
 
       <section className="landing-section landing-benefits" id="beneficios">
