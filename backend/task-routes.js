@@ -99,7 +99,7 @@ function createTaskRoutes({ db, auth, requirePermission, audit }) {
     try {
       const participant = await isParticipant(request.params.id, request.user.id, request.user.company_id)
       if (!participant) return response.status(404).json({ error: 'Solicitação não encontrada.' })
-      if (!participant.isSender) await db.run('UPDATE task_recipients SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND company_id = ? AND recipient_user_id = ?', [request.params.id, request.user.company_id, request.user.id])
+      if (!participant.isSender) await db.run('UPDATE task_recipients SET read_at = COALESCE(read_at, CAST(CURRENT_TIMESTAMP AS TEXT)), updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND company_id = ? AND recipient_user_id = ?', [request.params.id, request.user.company_id, request.user.id])
       const task = await getTask(request.params.id, request.user.company_id)
       const [recipients, messages] = await Promise.all([
         db.all('SELECT r.recipient_user_id AS id, u.name, u.email, u.job_title, r.status, r.read_at, r.created_at FROM task_recipients r JOIN users u ON u.id = r.recipient_user_id AND u.company_id = r.company_id WHERE r.task_id = ? AND r.company_id = ? ORDER BY u.name ASC', [task.id, request.user.company_id]),
@@ -137,7 +137,7 @@ function createTaskRoutes({ db, auth, requirePermission, audit }) {
       if (participant.isSender) return response.status(403).json({ error: 'Somente os destinatários podem atualizar o andamento desta solicitação.' })
       if (participant.task.status === 'CANCELADA') return response.status(409).json({ error: 'Esta solicitação foi cancelada.' })
       await db.transaction(async () => {
-        await db.run('UPDATE task_recipients SET status = ?, read_at = COALESCE(read_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND company_id = ? AND recipient_user_id = ?', [nextStatus, request.params.id, request.user.company_id, request.user.id])
+        await db.run('UPDATE task_recipients SET status = ?, read_at = COALESCE(read_at, CAST(CURRENT_TIMESTAMP AS TEXT)), updated_at = CURRENT_TIMESTAMP WHERE task_id = ? AND company_id = ? AND recipient_user_id = ?', [nextStatus, request.params.id, request.user.company_id, request.user.id])
         const summary = await db.get("SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'CONCLUIDA' THEN 1 ELSE 0 END) AS completed, SUM(CASE WHEN status = 'EM_ANDAMENTO' THEN 1 ELSE 0 END) AS in_progress FROM task_recipients WHERE task_id = ? AND company_id = ?", [request.params.id, request.user.company_id])
         const overall = Number(summary.completed || 0) === Number(summary.total || 0) ? 'CONCLUIDA' : Number(summary.in_progress || 0) > 0 ? 'EM_ANDAMENTO' : 'PENDENTE'
         await db.run('UPDATE tasks SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [overall, request.params.id, request.user.company_id])

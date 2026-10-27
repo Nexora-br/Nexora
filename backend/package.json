@@ -7,6 +7,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node seed.js",
+    "migrate": "node migrate-sqlite-to-postgres.js",
     "test": "node --test tests/api.test.js"
   },
   "keywords": [],

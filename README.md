@@ -5,7 +5,7 @@ Sistema de gestao empresarial para instalacao e acompanhamento de silos e secado
 ## Estrutura
 
 - `frontend`: dashboard React + Vite.
-- `backend`: API Express + SQLite com autenticação JWT, multi-tenant, auditoria e dados persistentes.
+- `backend`: API Express + PostgreSQL com autenticação JWT, multi-tenant, auditoria e dados persistentes.
 - `images`: assets originais da marca.
 
 ## Executar
@@ -25,11 +25,29 @@ npm --prefix F:\Nexora\frontend run dev
 API: `http://localhost:3333`
 Frontend: endereço exibido pelo Vite, normalmente `http://localhost:5173`
 
+## Banco de dados (PostgreSQL)
+
+O backend usa **PostgreSQL** sempre que a variável `DATABASE_URL` está definida. Sem ela, cai para o SQLite (apenas para desenvolvimento local e testes).
+
+```text
+DATABASE_URL=postgresql://usuario:senha@host:5433/nexora
+```
+
+Num banco vazio o schema é criado automaticamente na primeira execução (tabelas, índices e permissões padrão).
+
+### Migrar um SQLite existente
+
+```powershell
+npm --prefix F:\Nexora\backend run migrate -- F:\Nexora\backend\nexora.sqlite
+```
+
+O script `backend/migrate-sqlite-to-postgres.js` copia as tabelas respeitando as chaves estrangeiras, é idempotente (pode ser executado de novo) e imprime, tabela a tabela, quantas linhas foram migradas e quaisquer colunas ausentes no destino. Requer `DATABASE_URL` e as dependências de desenvolvimento instaladas (`npm install` na pasta `backend`, porque usa o pacote `sqlite3`).
+
 ## Deploy
 
 - Frontend: GitHub Pages (deployment automático via GitHub Actions).
 - Backend: Render como serviço Node.js usando `npm start`.
-- Banco: SQLite atual em Persistent Disk do Render; não usar múltiplas instâncias sem migrar para PostgreSQL.
+- Banco: PostgreSQL configurado pela variável `DATABASE_URL` (Render Postgres, Supabase ou outro provedor). O schema é criado automaticamente na primeira execução.
 - Uploads: `backend/storage/<company_id>` no mesmo Persistent Disk.
 
 ### Frontend (GitHub Pages)
@@ -82,7 +100,7 @@ Operações de estoque:
 - `GET/POST /api/inventory/reservations`
 - `POST /api/purchase-orders/:id/receive`
 
-Todos os registros filtram por `company_id`, exigem JWT e as alterações importantes geram `audit_logs`. O banco é criado em `backend/nexora.sqlite` e o seed de demonstração é separado:
+Todos os registros filtram por `company_id`, exigem JWT e as alterações importantes geram `audit_logs`. Com `DATABASE_URL` definida o banco é o PostgreSQL; sem ela o backend usa `backend/nexora.sqlite` apenas em desenvolvimento local. O seed de demonstração é separado:
 
 ```powershell
 npm --prefix F:\Nexora\backend run seed
@@ -98,7 +116,7 @@ npm --prefix F:\Nexora\frontend run build
 npm --prefix F:\Nexora\frontend run lint
 ```
 
-Suíte atual: 10 testes aprovados, incluindo autenticação, isolamento multi-tenant, fornecedores, compras, recebimento com estoque, pagamento com transação, upload/download, equipamentos, agenda, filtros e paginação.
+Suíte atual: 32 testes, incluindo autenticação, isolamento multi-tenant, fornecedores, compras, recebimento com estoque, pagamento com transação, upload/download, equipamentos, agenda, filtros e paginação. O mesmo resultado (30 aprovados) é obtido com `DATABASE_URL` apontando para PostgreSQL ou sem ela (SQLite).
 
 ## Nexora AI — situação atual
 
