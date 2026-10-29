@@ -116,7 +116,10 @@ function createSubscriptionRoutes({ express, db, auth, requirePermission, requir
       response.status(201).json({ url: session.url })
     } catch (error) {
       console.error('Stripe Checkout session creation failed:', error)
-      response.status(502).json({ error: 'Não foi possível iniciar o Checkout da Stripe.' })
+      const stripeMessage = typeof error?.type === 'string' && error.type.startsWith('Stripe') && error.message
+        ? `A Stripe recusou a solicitação: ${error.message}`
+        : 'Não foi possível iniciar o Checkout da Stripe. Consulte os logs do serviço no Render.'
+      response.status(502).json({ error: stripeMessage })
     }
   })
 
