@@ -112,9 +112,15 @@ export function useBusinessAutofill() {
     }
   }
 
+  function onBlurCapture(event) {
+    const field = event.target?.name
+    if (field === 'cnpj') void lookup('cnpj', event.target.value)
+    if (field === 'zip_code') void lookup('zip_code', event.target.value)
+  }
+
   function lookupCurrentCnpj() {
     void lookup('cnpj', formRef.current?.elements.namedItem('cnpj')?.value)
   }
 
-  return { formRef, lookupState, lookupCurrentCnpj }
+  return { formRef, lookupState, lookupCurrentCnpj, onBlurCapture }
 }

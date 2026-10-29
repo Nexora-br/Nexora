@@ -10,7 +10,7 @@
 - O cadastro exige aceitação dos Termos; o servidor grava no registro do usuário ou pedido de acesso o horário e a versão do texto aceita. Isso não equivale a consentimento para todos os tratamentos de dados.
 - Adicionados links legais à página pública, às páginas de planos e à barra lateral da área autenticada.
 - Removido o carregamento de Google Fonts, que fazia conexão externa em visita à página.
-- Removida a consulta automática de CNPJ/CEP ao sair dos campos. A consulta BrasilAPI permanece somente no botão explícito “Buscar dados”.
+- Consultas automáticas de CNPJ/CEP foram restauradas ao sair dos campos, bloqueadas até aceite explícito dos Termos, Política de Privacidade, Aviso de Cookies e Política de Cancelamento/Reembolso. O aceite em contas existentes é registrado no backend com versão e horário; cadastro e pedido de acesso já gravam os mesmos metadados.
 - Removidos do cadastro inicial os campos opcionais de logo, configurações de documentos admissionais e política de reembolso/refeição. Permanecem nas configurações empresariais, onde são pertinentes.
 - O Nexora AI deixou de consultar automaticamente o estado de login do Puter ao abrir a tela. Pergunta e contexto só são encaminhados após autorização explícita na interface. A autorização é por uso e não é persistida.
 - Adicionados link para pular ao conteúdo, foco visível para controles e preferência por movimento reduzido. As imagens encontradas na interface têm texto alternativo, inclusive imagens decorativas com `alt=""`.
@@ -24,7 +24,7 @@
 | Pedido de acesso de usuário | CNPJ da empresa, nome, e-mail, senha, telefone/cargo/setor opcionais e aceite dos Termos | API Nexora e banco configurado |
 | Operação da empresa | clientes, fornecedores, pessoas, agenda, financeiro, funcionários, segurança do trabalho, documentos e outros registros empresariais | API Nexora e banco; uploads em disco ou Supabase quando configurado |
 | Pagamento | identificadores de Stripe Customer, Subscription, Checkout e estado/valor da cobrança | Backend Nexora e Stripe Checkout; o fluxo atual usa Checkout hospedado. Nunca inserir cartão em campos comuns |
-| Consulta empresarial | CNPJ e CEP quando a pessoa aciona “Buscar dados” | BrasilAPI, chamada pelo navegador |
+| Consulta empresarial | CNPJ/CEP no desfoque do campo ou por ação explícita, apenas após aceite dos documentos legais | BrasilAPI, chamada pelo navegador |
 | Nexora AI | pergunta e dados de contexto selecionados por intenção (resumos/linhas limitadas) | API Nexora; no modo Puter, o contexto e a pergunta seguem ao Puter/modelo externo após autorização |
 | Sessão | JWT da conta e JWT separado do portal | `localStorage` do navegador até logout/remoção |
 | Formulário LGPD | nome, e-mail, empresa opcional, categoria do pedido e detalhes opcionais | Aplicativo de e-mail do próprio titular; não é guardado pelo site |

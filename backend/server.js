@@ -399,6 +399,14 @@ function validCnpj(value) {
 
 const TERMS_VERSION = '2026-10-29'
 
+app.post('/api/legal/accept-terms', auth, async (request, response) => {
+  try {
+    const acceptedAt = new Date().toISOString()
+    await db.run('UPDATE users SET terms_accepted_at = ?, terms_version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [acceptedAt, TERMS_VERSION, request.user.id, request.user.company_id])
+    response.json({ ok: true, termsVersion: TERMS_VERSION, acceptedAt })
+  } catch (error) { errorResponse(response, error) }
+})
+
 app.post('/api/auth/register', registrationRateLimit, async (request, response) => {
   try {
     const { companyName, legalName, cnpj, userName, email, password, phone, segment, zip_code, address, address_number, complement, district, city, state, website } = request.body || {}
