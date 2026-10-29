@@ -1,0 +1,74 @@
+.checkout-success-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 28px;
+  color: #31576b;
+  background: radial-gradient(ellipse at 50% 0, #e4f4f8 0, transparent 42%), #f6f9fa;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.checkout-success-card {
+  width: min(100%, 560px);
+  padding: clamp(30px, 7vw, 58px);
+  border: 1px solid #e4eef1;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 24px 80px rgba(30, 74, 96, .1);
+  text-align: center;
+}
+
+.checkout-success-check {
+  display: grid;
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 22px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #2d9b78;
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.checkout-success-kicker {
+  margin: 0 0 10px;
+  color: #4387a1;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .16em;
+}
+
+.checkout-success-card h1 {
+  margin: 0 0 14px;
+  color: #163f58;
+  font: 750 clamp(27px, 5vw, 38px)/1.15 Manrope, sans-serif;
+  letter-spacing: -1px;
+}
+
+.checkout-success-card > p:not(.checkout-success-kicker) {
+  margin: 0;
+  color: #718995;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.checkout-success-card a {
+  color: #287b9b;
+  font-weight: 700;
+}
+
+.checkout-success-button {
+  margin-top: 28px;
+  padding: 13px 20px;
+  border: 0;
+  border-radius: 11px;
+  color: #fff;
+  background: #287b9b;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.checkout-success-button:hover { background: #206681; }

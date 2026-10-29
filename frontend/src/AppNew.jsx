@@ -18,6 +18,7 @@ import { EmployeesPage } from './EmployeesPage'
 import { SafetyPage } from './SafetyPage'
 import { TeamsPage } from './TeamsPage'
 import { SubscriptionPage } from './SubscriptionPage'
+import { CheckoutSuccessPage } from './CheckoutSuccessPage'
 import { API_URL } from './apiConfig'
 import { isValidCnpj, normalizeCnpj, useBusinessAutofill } from './businessLookups'
 import { AdmissionDocumentChoices, fileAsDataUrl } from './admissionDocuments.jsx'
@@ -300,6 +301,8 @@ function AppNew() {
     setShowCheckout(false)
     setBillingGate({ token: null, loading: false, active: false, error: '' })
   }
+
+  if (new URLSearchParams(window.location.search).get('checkout') === 'success') return <CheckoutSuccessPage />
 
   if (!session?.token) return showClientPortal
     ? <ClientPortal initialSession={(() => { try { return JSON.parse(localStorage.getItem('nexora-client-portal-session') || 'null') } catch { return null } })()} onExit={() => setShowClientPortal(false)} />
