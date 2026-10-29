@@ -817,12 +817,16 @@ app.use(createSubscriptionRoutes({ express, db, auth, requirePermission, require
 
 if (require.main === module) {
   if (isProduction && !frontendOrigin) throw new Error('FRONTEND_ORIGIN deve ser configurado em produção.')
-  const server = app.listen(port, () => console.log(`Nexora API running on port ${port}`))
+  let server
   let shuttingDown = false
   const shutdown = (signal) => {
     if (shuttingDown) return
     shuttingDown = true
     console.log(`Nexora API shutting down (${signal})`)
+    if (!server) {
+      db.close().catch((dbError) => console.error('Database shutdown error:', dbError.message)).finally(() => { process.exit() })
+      return
+    }
     server.close(async (error) => {
       if (error) { console.error('HTTP server shutdown error:', error.message); process.exitCode = 1 }
       try { await db.close() } catch (dbError) { console.error('Database shutdown error:', dbError.message); process.exitCode = 1 }
@@ -831,5 +835,13 @@ if (require.main === module) {
   }
   process.on('SIGTERM', () => shutdown('SIGTERM'))
   process.on('SIGINT', () => shutdown('SIGINT'))
+  db.ready().then(() => {
+    if (shuttingDown) return
+    server = app.listen(port, () => console.log(`Nexora API running on port ${port}`))
+  }).catch(async (error) => {
+    console.error('Database initialization failed:', error)
+    try { await db.close() } catch (dbError) { console.error('Database shutdown error:', dbError.message) }
+    process.exitCode = 1
+  })
 }
 module.exports = { app }

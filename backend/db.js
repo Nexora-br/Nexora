@@ -212,4 +212,18 @@ async function transaction(callback) {
 }
 function close() { return new Promise((resolve, reject) => database.close((error) => error ? reject(error) : resolve())) }
 
-module.exports = { run, get, all, transaction, close }
+async function ready() {
+	if (!usingPostgres) return
+	// Wait for schema creation, migrations, and seed data queued during module loading.
+	await postgresReady
+	// Startup must fail visibly when initialization could not create the core schema.
+	await postgresPool.query(`
+		SELECT
+			(SELECT COUNT(*) FROM companies) AS companies,
+			(SELECT COUNT(*) FROM users) AS users,
+			(SELECT COUNT(*) FROM roles) AS roles,
+			(SELECT COUNT(*) FROM permissions) AS permissions
+	`)
+}
+
+module.exports = { run, get, all, transaction, close, ready }

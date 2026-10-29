@@ -136,6 +136,7 @@ function AppNew() {
   const [projects, setProjects] = useState([])
   const [supplies, setSupplies] = useState([])
   const [dataError, setDataError] = useState('')
+  const [dataLoading, setDataLoading] = useState(false)
   const [dataRefresh, setDataRefresh] = useState(0)
   const [suppliers, setSuppliers] = useState([])
   const [clients, setClients] = useState([])
@@ -176,6 +177,8 @@ function AppNew() {
 
   useEffect(() => {
     if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined
+    let current = true
+    setDataLoading(true)
     const headers = { Authorization: `Bearer ${session.token}` }
     const fetchJson = (url, options = {}) => Promise.resolve(fetch(url, options)).then(async (response) => {
       if (!response) return []
@@ -189,9 +192,6 @@ function AppNew() {
       } catch {
         return []
       }
-    }).catch((error) => {
-      if (error?.status === 401) throw error
-      return []
     })
 
     const requests = [
@@ -200,12 +200,15 @@ function AppNew() {
     ]
 
     Promise.all(requests).then(([dashboard, projectResult]) => {
+      if (!current) return
       setDashboardData(dashboard)
       const projectRows = rowsFrom(projectResult)
       setProjects(projectRows)
       if (projectResult?.pagination) setProjectPagination(projectResult.pagination)
-    }).catch(() => setDataError('Não foi possível carregar os dados.'))
-    return undefined
+      setDataError('')
+    }).catch(() => { if (current) setDataError('Não foi possível carregar os dados da empresa. Verifique a conexão e tente novamente.') })
+      .finally(() => { if (current) setDataLoading(false) })
+    return () => { current = false }
   }, [session?.token, dataRefresh, billingUiEnabled, billingGate])
 
   useEffect(() => { if (session?.role === 'TECNICO_SEGURANCA') setActiveMenu('Segurança do Trabalho') }, [session?.role])
@@ -341,6 +344,7 @@ function AppNew() {
   async function setDocumentVisibility(document, projectId, visible) { try { const response = await fetch(`${API_URL}/documents/${document.id}/portal-visibility`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` }, body: JSON.stringify({ visible, project_id: projectId }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível alterar a liberação.'); setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, ...result } : item)); notify(visible ? 'Documento liberado no portal do cliente.' : 'Documento removido do portal.') } catch (error) { notify(error.message || 'Não foi possível alterar a liberação.') } }
 
   const liveStats = dashboardData
+  if (dataLoading) return <DataState message="Carregando os dados da empresa…" />
   if (dataError) return <DataState message={dataError} action={<button className="blue-button" onClick={retryData}>Tentar novamente</button>} />
   visualPageApi = { projects: { pagination: projectPagination, onLoad: loadProjects }, stock: { pagination: stockPagination, onLoad: loadStock }, clients: { pagination: clientPagination, onLoad: loadClients }, suppliers: { pagination: supplierPagination, onLoad: loadSuppliers }, purchases: { pagination: purchasePagination, onLoad: loadPurchaseRequests }, finance: { pagination: payablePagination, onLoad: loadPayables }, equipment: { pagination: equipmentPagination, onLoad: loadEquipments }, agenda: { pagination: agendaPagination, onLoad: loadAgenda }, documents: { pagination: documentPagination, onLoad: loadDocuments } }
   return <div className="nexora-shell">
