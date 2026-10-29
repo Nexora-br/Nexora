@@ -123,7 +123,9 @@ describe('autenticação', () => {
   })
 
   it('não exibe dados fictícios quando a rota protegida retorna 401', async () => {
-    localStorage.setItem('nexora-session', JSON.stringify({ token: 'token-expirado', userName: 'João', companyName: 'Empresa', role: 'CONSULTA', permissions: [] }))
+    // Permissões reais de um perfil CONSULTA (roleRules.CONSULTA = ['view']) —
+    // sem elas o app nem consulta a API e nenhum 401 seria percebido.
+    localStorage.setItem('nexora-session', JSON.stringify({ token: 'token-expirado', userName: 'João', companyName: 'Empresa', role: 'CONSULTA', permissions: ['dashboard.view', 'projects.view'] }))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ error: 'Sessão inválida.' }, false, 401)))
     render(<AppNew />)
     await waitFor(() => expect(screen.getByText('Não foi possível carregar os dados.')).toBeInTheDocument())
@@ -173,8 +175,10 @@ describe('nexora ai', () => {
     const user = userEvent.setup()
     render(<AppNew />)
 
+    // A navegação é agrupada e recolhida por padrão: abre o grupo antes do atalho.
+    await user.click(screen.getByRole('button', { name: 'GESTÃO E ANÁLISE' }))
     await user.click(screen.getByRole('button', { name: 'Nexora AI' }))
-    expect(screen.getByText('Nexora AI')).toBeInTheDocument()
+    expect(await screen.findByText('Nexora AI')).toBeInTheDocument()
     await user.type(screen.getByPlaceholderText('Pergunte sobre seu negócio...'), 'Quanto tenho para receber?')
     await user.click(screen.getByRole('button', { name: 'Enviar' }))
 
@@ -205,7 +209,7 @@ describe('histórico real', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([{ id: 'log-1', created_at: '2026-09-21T15:10:00Z', user_name: 'João', action: 'EDITAR', module: 'SUPPLIERS', new_value: '{"city":"Rio Verde"}' }])))
     render(<HistoryPanel recordId="supplier-a" module="SUPPLIERS" />)
     await waitFor(() => expect(screen.getByText('EDITAR · SUPPLIERS')).toBeInTheDocument())
-    expect(screen.getByText('João')).toBeInTheDocument()
+    expect(screen.getByText('Autor: João')).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/audit-logs/by-entity/supplier-a'), expect.objectContaining({ headers: { Authorization: 'Bearer token' } }))
   })
 
@@ -213,7 +217,7 @@ describe('histórico real', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse([])).mockResolvedValueOnce(jsonResponse({}, false, 500)).mockResolvedValueOnce(jsonResponse({}, false, 403))
     vi.stubGlobal('fetch', fetchMock)
     const { rerender } = render(<HistoryPanel recordId="a" module="SUPPLIERS" />)
-    await waitFor(() => expect(screen.getByText('Não há dados cadastrados.')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Não há ações registradas.')).toBeInTheDocument())
     rerender(<HistoryPanel recordId="b" module="SUPPLIERS" />)
     await waitFor(() => expect(screen.getByText('Não foi possível carregar o histórico.')).toBeInTheDocument())
     rerender(<HistoryPanel recordId="c" module="SUPPLIERS" />)

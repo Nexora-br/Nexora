@@ -107,7 +107,9 @@ function AppNew() {
   const prefersReducedMotion = useReducedMotion()
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('nexora-session') || 'null'))
   const [showClientPortal, setShowClientPortal] = useState(() => Boolean(localStorage.getItem('nexora-client-portal-session')))
-  const billingUiEnabled = (import.meta.env.DEV && import.meta.env.MODE !== 'test') || import.meta.env.VITE_ENABLE_SIMULATED_BILLING === 'true'
+  // O gate de assinatura só entra quando o build pede explicitamente (VITE_ENABLE_SIMULATED_BILLING=true);
+  // sem isso o login cai direto na conta, tanto em dev quanto em produção.
+  const billingUiEnabled = import.meta.env.VITE_ENABLE_SIMULATED_BILLING === 'true'
   const [billingGate, setBillingGate] = useState({ token: null, loading: false, active: false, error: '' })
   const [authView, setAuthView] = useState('login')
   const [showAuth, setShowAuth] = useState(false)
@@ -218,6 +220,14 @@ function AppNew() {
   // eslint-disable-next-line react/immutability, react-hooks/exhaustive-deps
     useEffect(() => { if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined; const params = query.trim() ? { search: query.trim(), page: 1 } : { page: 1 }; if (activeMenu === 'Projetos e obras') { loadProjects(params); loadClients({ page: 1, pageSize: 100 }) } if (activeMenu === 'Clientes' || activeMenu === 'Portal do cliente') loadClients(params); if (activeMenu === 'Estoque') loadStock(params); if (activeMenu === 'Fornecedores') loadSuppliers(params); if (activeMenu === 'Compras') { loadPurchaseRequests(params); void loadQuotations(params) } if (activeMenu === 'Financeiro') { loadProjects({ page: 1, pageSize: 100 }); loadPayables(params); loadReceivables(params) } if (activeMenu === 'Equipamentos') { loadEquipments(params); loadMaintenances(params) } if (activeMenu === 'Agenda de campo') loadAgenda(params); if (activeMenu === 'Documentos') { loadDocuments({ ...params, scope: 'company' }); loadProjects({ page: 1, pageSize: 100 }) } if (activeMenu === 'Contratos') { loadDocuments({ ...params, scope: 'contracts' }); loadProjects({ page: 1, pageSize: 100 }) } return undefined }, [activeMenu, query, session?.token, billingGate, billingUiEnabled])
 
+  // Hook precisa ficar antes de qualquer return condicional (ordem de hooks do React).
+  useEffect(() => {
+    const activeGroup = menuGroups.find((group) => group.items.some(({ label }) => label === activeMenu))
+    if (activeGroup && activeGroup.title !== 'INÍCIO') {
+      setExpandedNavGroups((current) => current[activeGroup.title] ? current : { ...current, [activeGroup.title]: true })
+    }
+  }, [activeMenu])
+
   async function handleLogin(event) {
     event.preventDefault()
     const form = event.currentTarget
@@ -292,7 +302,7 @@ function AppNew() {
   const initials = session.userName.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase()
   const companyInitials = session.companyName.split(' ').map((name) => name[0]).join('').slice(0, 2).toUpperCase()
   const breadcrumbTitle = activeMenu === 'Nexora AI' ? 'Assistente' : activeMenu
-  function retryData() { setDataError(''); setDataLoading(true); setDataRefresh((current) => current + 1) }
+  function retryData() { setDataError(''); setDataRefresh((current) => current + 1) }
 
   function notify(message) { setToast(message) }
   async function assignProjectClient(project, clientId) { try { const response = await fetch(`${API_URL}/projects/${project.id}/client`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` }, body: JSON.stringify({ client_id: clientId || null }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível vincular o cliente.'); setProjects((current) => current.map((item) => item.id === project.id ? { ...item, client_id: result.client_id } : item)); notify(result.client_id ? 'Cliente vinculado à obra.' : 'Vínculo do cliente removido.') } catch (error) { notify(error.message || 'Não foi possível vincular o cliente.') } }
@@ -331,12 +341,6 @@ function AppNew() {
   async function setDocumentVisibility(document, projectId, visible) { try { const response = await fetch(`${API_URL}/documents/${document.id}/portal-visibility`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` }, body: JSON.stringify({ visible, project_id: projectId }) }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Não foi possível alterar a liberação.'); setDocuments((current) => current.map((item) => item.id === document.id ? { ...item, ...result } : item)); notify(visible ? 'Documento liberado no portal do cliente.' : 'Documento removido do portal.') } catch (error) { notify(error.message || 'Não foi possível alterar a liberação.') } }
 
   const liveStats = dashboardData
-  useEffect(() => {
-    const activeGroup = menuGroups.find((group) => group.items.some(({ label }) => label === activeMenu))
-    if (activeGroup && activeGroup.title !== 'INÍCIO') {
-      setExpandedNavGroups((current) => current[activeGroup.title] ? current : { ...current, [activeGroup.title]: true })
-    }
-  }, [activeMenu])
   if (dataError) return <DataState message={dataError} action={<button className="blue-button" onClick={retryData}>Tentar novamente</button>} />
   visualPageApi = { projects: { pagination: projectPagination, onLoad: loadProjects }, stock: { pagination: stockPagination, onLoad: loadStock }, clients: { pagination: clientPagination, onLoad: loadClients }, suppliers: { pagination: supplierPagination, onLoad: loadSuppliers }, purchases: { pagination: purchasePagination, onLoad: loadPurchaseRequests }, finance: { pagination: payablePagination, onLoad: loadPayables }, equipment: { pagination: equipmentPagination, onLoad: loadEquipments }, agenda: { pagination: agendaPagination, onLoad: loadAgenda }, documents: { pagination: documentPagination, onLoad: loadDocuments } }
   return <div className="nexora-shell">
