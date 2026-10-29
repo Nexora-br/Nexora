@@ -397,9 +397,12 @@ function validCnpj(value) {
   return cnpj.endsWith(`${first}${second}`)
 }
 
+const TERMS_VERSION = '2026-10-29'
+
 app.post('/api/auth/register', registrationRateLimit, async (request, response) => {
   try {
     const { companyName, legalName, cnpj, userName, email, password, phone, segment, zip_code, address, address_number, complement, district, city, state, website } = request.body || {}
+    if (request.body?.termsAccepted !== true) return response.status(400).json({ error: 'É necessário aceitar os Termos de Serviço para criar uma conta.' })
     const normalizedEmail = String(email || '').trim().toLowerCase()
     const normalizedCompany = String(companyName || legalName || '').trim()
     const normalizedLegalName = String(legalName || companyName || '').trim()
@@ -434,7 +437,7 @@ app.post('/api/auth/register', registrationRateLimit, async (request, response) 
     await db.transaction(async () => {
       await db.run('INSERT INTO companies (id, legal_name, trade_name, cnpj, email, phone, segment, zip_code, address, address_number, complement, district, city, state, website, admission_logo_data_url, admission_document_keys, salary_bank_name, reimbursement_dinner, reimbursement_lunch, reimbursement_breakfast) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [companyId, normalizedLegalName, normalizedCompany, normalizedCnpj, companyEmail || normalizedEmail, String(phone || '').trim() || null, String(segment || '').trim() || null, normalizedZipCode || null, String(address || '').trim() || null, String(address_number || '').trim() || null, String(complement || '').trim() || null, String(district || '').trim() || null, String(city || '').trim() || null, normalizedState || null, String(website || '').trim() || null, logoDataUrl || null, JSON.stringify(documentKeys), salaryBankName, ...reimbursement])
       const role = await db.get('SELECT id FROM roles WHERE name = ?', ['ADMINISTRADOR'])
-      await db.run('INSERT INTO users (id, company_id, name, email, password_hash, job_title) VALUES (?, ?, ?, ?, ?, ?)', [userId, companyId, normalizedName, normalizedEmail, passwordHash, 'Administrador'])
+      await db.run('INSERT INTO users (id, company_id, name, email, password_hash, job_title, terms_accepted_at, terms_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [userId, companyId, normalizedName, normalizedEmail, passwordHash, 'Administrador', new Date().toISOString(), TERMS_VERSION])
       await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
     })
     const user = await db.get('SELECT u.*, r.name AS role FROM users u JOIN user_roles ur ON ur.user_id = u.id JOIN roles r ON r.id = ur.role_id WHERE u.id = ?', [userId])
@@ -450,6 +453,7 @@ app.post('/api/auth/register', registrationRateLimit, async (request, response) 
 app.post('/api/auth/join-request', registrationRateLimit, async (request, response) => {
   try {
     const { name, email, password, phone, job_title: jobTitle, department } = request.body || {}
+    if (request.body?.termsAccepted !== true) return response.status(400).json({ error: 'É necessário aceitar os Termos de Serviço para solicitar acesso.' })
     const cnpj = normalizeCnpj(request.body?.cnpj)
     const normalizedEmail = String(email || '').trim().toLowerCase()
     const normalizedName = String(name || '').trim()
@@ -465,7 +469,7 @@ app.post('/api/auth/join-request', registrationRateLimit, async (request, respon
     const duplicate = await db.get("SELECT id FROM company_access_requests WHERE company_id = ? AND lower(trim(email)) = ? AND status = 'PENDENTE'", [company.id, normalizedEmail])
     if (duplicate) return response.status(409).json({ error: 'Já existe um pedido pendente com este e-mail para a empresa.' })
     const requestId = id()
-    await db.run('INSERT INTO company_access_requests (id, company_id, name, email, password_hash, phone, job_title, department) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [requestId, company.id, normalizedName, normalizedEmail, await bcrypt.hash(String(password), 12), String(phone || '').trim() || null, String(jobTitle || '').trim() || null, String(department || '').trim() || null])
+    await db.run('INSERT INTO company_access_requests (id, company_id, name, email, password_hash, phone, job_title, department, terms_accepted_at, terms_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [requestId, company.id, normalizedName, normalizedEmail, await bcrypt.hash(String(password), 12), String(phone || '').trim() || null, String(jobTitle || '').trim() || null, String(department || '').trim() || null, new Date().toISOString(), TERMS_VERSION])
     response.status(202).json({ id: requestId, status: 'PENDENTE', message: 'Pedido enviado. Um administrador da empresa precisa aprovar seu acesso.' })
   } catch (error) { if (error.code === '23505' || error.message.includes('idx_company_access_requests_pending_email')) return response.status(409).json({ error: 'Já existe um pedido pendente com este e-mail para a empresa.' }); errorResponse(response, error) }
 })
@@ -721,7 +725,7 @@ app.post('/api/company-access-requests/:id/decision', auth, requireAdministrator
     if (existing) return response.status(409).json({ error: 'Este e-mail já possui uma conta nesta empresa.' })
     const userId = id()
     await db.transaction(async () => {
-      await db.run('INSERT INTO users (id, company_id, name, email, password_hash, phone, job_title) VALUES (?, ?, ?, ?, ?, ?, ?)', [userId, request.user.company_id, accessRequest.name, accessRequest.email, accessRequest.password_hash, accessRequest.phone, accessRequest.job_title])
+      await db.run('INSERT INTO users (id, company_id, name, email, password_hash, phone, job_title, terms_accepted_at, terms_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [userId, request.user.company_id, accessRequest.name, accessRequest.email, accessRequest.password_hash, accessRequest.phone, accessRequest.job_title, accessRequest.terms_accepted_at, accessRequest.terms_version])
       await db.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
       const claim = await db.run("UPDATE company_access_requests SET status = 'APROVADA', password_hash = '', linked_user_id = ?, reviewed_by = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ? AND status = 'PENDENTE'", [userId, request.user.id, accessRequest.id, request.user.company_id])
       if (!claim.changes) throw new Error('Este pedido já foi analisado.')
