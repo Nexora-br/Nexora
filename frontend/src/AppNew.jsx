@@ -114,7 +114,7 @@ function AppNew() {
   const [authView, setAuthView] = useState('login')
   const [showAuth, setShowAuth] = useState(false)
   const [showPlans, setShowPlans] = useState(false)
-  const [showCheckout, setShowCheckout] = useState(false)
+  const [stripeCheckoutAfterAuth, setStripeCheckoutAfterAuth] = useState(false)
   const [authError, setAuthError] = useState('')
   const [authInfo, setAuthInfo] = useState('')
   const [activeMenu, setActiveMenu] = useState('Visão geral')
@@ -191,6 +191,23 @@ function AppNew() {
     void checkSubscription()
     return () => { current = false; window.clearTimeout(retryTimer) }
   }, [session?.token, billingUiEnabled])
+
+  useEffect(() => {
+    if (!stripeCheckoutAfterAuth || !session?.token) return undefined
+    let current = true
+    setActiveMenu('Assinaturas')
+    fetch(`${API_URL}/subscription/stripe-checkout`, { method: 'POST', headers: { Authorization: `Bearer ${session.token}` } })
+      .then(async (response) => {
+        const contentType = response.headers.get('content-type') || ''
+        const result = contentType.includes('application/json') ? await response.json() : {}
+        if (!response.ok) throw new Error(result.error || 'Não foi possível iniciar o Checkout da Stripe.')
+        if (!result.url) throw new Error('A Stripe não retornou o endereço do Checkout.')
+        return result.url
+      })
+      .then((url) => { if (current) { setStripeCheckoutAfterAuth(false); window.location.assign(url) } })
+      .catch((error) => { if (current) { setStripeCheckoutAfterAuth(false); setToast(error.message || 'Não foi possível iniciar o Checkout da Stripe.') } })
+    return () => { current = false }
+  }, [stripeCheckoutAfterAuth, session?.token])
 
   useEffect(() => {
     if (!session?.token || (billingUiEnabled && (billingGate.token !== session.token || billingGate.loading || !billingGate.active))) return undefined
@@ -298,7 +315,6 @@ function AppNew() {
     setAuthView('login')
     setShowAuth(false)
     setShowPlans(false)
-    setShowCheckout(false)
     setBillingGate({ token: null, loading: false, active: false, error: '' })
   }
 
@@ -307,11 +323,9 @@ function AppNew() {
   if (!session?.token) return showClientPortal
     ? <ClientPortal initialSession={(() => { try { return JSON.parse(localStorage.getItem('nexora-client-portal-session') || 'null') } catch { return null } })()} onExit={() => setShowClientPortal(false)} />
     : showAuth
-    ? <><button className="auth-back-button" onClick={() => { setAuthError(''); setAuthInfo(''); setShowAuth(false) }}>← Voltar à página inicial</button><AuthScreen view={authView} setView={(view) => { setAuthError(''); setAuthInfo(''); setAuthView(view) }} error={authError} info={authInfo} onLogin={handleLogin} onSignup={handleSignup} /></>
-    : showCheckout
-      ? <PublicCheckoutPage onBack={() => { setShowCheckout(false); setShowPlans(true) }} onContinue={() => { setAuthError(''); setAuthInfo(''); setAuthView('signup'); setShowAuth(true); setShowCheckout(false) }} onLogin={() => { setAuthError(''); setAuthView('login'); setShowAuth(true); setShowCheckout(false) }} />
-      : showPlans
-        ? <PublicPlansPage onBack={() => setShowPlans(false)} onSelect={() => { setShowPlans(false); setShowCheckout(true) }} onLogin={() => { setAuthError(''); setAuthView('login'); setShowAuth(true); setShowPlans(false) }} />
+    ? <><button className="auth-back-button" onClick={() => { setAuthError(''); setAuthInfo(''); setStripeCheckoutAfterAuth(false); setShowAuth(false) }}>← Voltar à página inicial</button><AuthScreen view={authView} setView={(view) => { setAuthError(''); setAuthInfo(''); setAuthView(view) }} error={authError} info={authInfo} onLogin={handleLogin} onSignup={handleSignup} /></>
+    : showPlans
+        ? <PublicPlansPage onBack={() => setShowPlans(false)} onSelect={() => { setAuthError(''); setAuthView('signup'); setStripeCheckoutAfterAuth(true); setShowAuth(true); setShowPlans(false) }} onLogin={() => { setAuthError(''); setAuthView('login'); setStripeCheckoutAfterAuth(true); setShowAuth(true); setShowPlans(false) }} />
       : <NexoraLandingPage onRestricted={() => { setAuthError(''); setAuthView('login'); setShowAuth(true) }} onPortal={() => setShowClientPortal(true)} onSelectPlans={() => setShowPlans(true)} />
 
   const billingPending = billingUiEnabled && (billingGate.token !== session.token || billingGate.loading)
@@ -593,9 +607,9 @@ function PublicPlansPage({ onBack, onSelect, onLogin }) {
   const features = ['Projetos e obras conectados à rotina de campo', 'Equipes, funcionários e documentos em um só lugar', 'Estoque, compras, equipamentos e financeiro integrados', 'Acesso para a equipe da empresa']
   return <div className="public-plans-page">
     <header className="public-plans-header"><button className="public-plans-back" onClick={onBack}>← Voltar à apresentação</button><img src={LOGO_URL} alt="Nexora" /><button className="public-plans-login" onClick={onLogin}>Já tenho conta</button></header>
-    <main className="public-plans-main"><div className="public-plans-intro"><span className="landing-section-kicker">PLANOS NEXORA</span><h1>Uma operação mais conectada começa aqui.</h1><p>Escolha o plano para sua empresa e conheça o fluxo de contratação.</p></div>
-      <section className="public-plan-card"><div className="public-plan-copy"><span className="public-plan-tag">PLANO PARA SUA EMPRESA</span><h2>Nexora Pro</h2><p>As ferramentas de gestão da Nexora para aproximar escritório, obras e equipes.</p><ul>{features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul></div><div className="public-plan-purchase"><span className="public-plan-caption">Investimento mensal</span><div className="public-plan-price">R$ 500<span>,00</span></div><span className="public-plan-period">por empresa / mês</span><button className="landing-primary" onClick={onSelect}>Selecionar plano <ArrowRight size={17} /></button><small>Na próxima etapa, escolha a forma de pagamento simulada.</small><div className="public-payment-methods"><span>FORMAS DISPONÍVEIS NA SIMULAÇÃO</span><div><b>Cartão</b><b>PIX</b><b>Boleto</b></div></div></div></section>
-      <div className="public-plan-note"><ShieldCheck size={17} /><p>Ambiente demonstrativo: a contratação e a aprovação do pagamento são simuladas. Não informe dados reais de cartão; nenhuma cobrança é realizada.</p></div>
+    <main className="public-plans-main"><div className="public-plans-intro"><span className="landing-section-kicker">PLANOS NEXORA</span><h1>Uma operação mais conectada começa aqui.</h1><p>Escolha seu plano, crie sua conta e finalize o pagamento com segurança pela Stripe.</p></div>
+      <section className="public-plan-card"><div className="public-plan-copy"><span className="public-plan-tag">PLANO PARA SUA EMPRESA</span><h2>Nexora Pro</h2><p>As ferramentas de gestão da Nexora para aproximar escritório, obras e equipes.</p><ul>{features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul></div><div className="public-plan-purchase"><span className="public-plan-caption">Investimento mensal</span><div className="public-plan-price">R$ 500<span>,00</span></div><span className="public-plan-period">por empresa / mês</span><button className="landing-primary" onClick={onSelect}>Continuar para cadastro <ArrowRight size={17} /></button><small>Após o cadastro ou login, você será direcionado ao Checkout da Stripe.</small><div className="public-payment-methods"><span>PAGAMENTO SEGURO</span><div><b>Stripe</b></div></div></div></section>
+      <div className="public-plan-note"><ShieldCheck size={17} /><p>O pagamento e a cobrança recorrente são processados pela Stripe. Os dados do cartão são informados somente na página segura de pagamento.</p></div>
       <p className="public-plan-existing">Já tem cadastro? <button onClick={onLogin}>Acesse sua conta</button></p>
     </main><footer className="public-plans-footer">© {new Date().getFullYear()} Nexora · Gestão conectada ao campo</footer>
   </div>
