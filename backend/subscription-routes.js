@@ -13,11 +13,14 @@ function addOneMonth(value) {
   return date.toISOString()
 }
 
-function createSubscriptionRoutes({ express, db, auth, requirePermission, requireRole, audit, id, enabled }) {
+function createSubscriptionRoutes({ express, db, auth, requirePermission, requireRole, audit, id, enabled, stripe, stripePriceId, frontendOrigin }) {
   const router = express.Router()
   const requireSimulator = (_request, response, next) => enabled()
     ? next()
     : response.status(404).json({ error: 'O simulador de assinaturas está desativado neste ambiente.' })
+  const requireBilling = (_request, response, next) => enabled() || stripe
+    ? next()
+    : response.status(404).json({ error: 'A cobrança de assinaturas não está configurada.' })
 
   async function currentSubscription(companyId) {
     const subscription = await db.get('SELECT id, company_id, plan, status, amount, payment_method, subscribed_at, next_charge_at, cancelled_at, created_at, updated_at FROM subscriptions WHERE company_id = ?', [companyId])
@@ -62,8 +65,59 @@ function createSubscriptionRoutes({ express, db, auth, requirePermission, requir
     return { subscription, payments, plan: { id: PLAN, name: 'Nexora Pro', amount: MONTHLY_AMOUNT, currency: 'BRL', interval: 'month' } }
   }
 
-  router.get('/api/subscription', auth, requireSimulator, async (request, response) => {
+  router.get('/api/subscription', auth, requireBilling, async (request, response) => {
     try { response.json(await responseData(request.user.company_id)) } catch (error) { console.error(error); response.status(500).json({ error: 'Não foi possível carregar a assinatura.' }) }
+  })
+
+  router.post('/api/subscription/stripe-checkout', auth, requireRole('ADMINISTRADOR'), async (request, response) => {
+    try {
+      if (!stripe) return response.status(503).json({ error: 'Configure STRIPE_SECRET_KEY no servidor para ativar o Checkout.' })
+      if (!stripePriceId || stripePriceId === 'price_...') return response.status(503).json({ error: 'Configure STRIPE_PRICE_ID com o preço mensal do Nexora Pro.' })
+      const price = await stripe.prices.retrieve(stripePriceId)
+      if (!price.active || price.currency !== 'brl' || price.unit_amount !== MONTHLY_AMOUNT * 100 || price.recurring?.interval !== 'month') {
+        return response.status(400).json({ error: 'O Price ID precisa estar ativo e corresponder ao Nexora Pro mensal de R$ 500,00.' })
+      }
+      const companyId = request.user.company_id
+      const current = await currentSubscription(companyId)
+      if (current?.status === 'ATIVA') return response.status(409).json({ error: 'Esta empresa já possui uma assinatura ativa.' })
+
+      const existing = await db.get('SELECT id, stripe_customer_id, stripe_checkout_session_id FROM subscriptions WHERE company_id = ?', [companyId])
+      const subscriptionId = existing?.id || id()
+      if (existing?.stripe_checkout_session_id) {
+        const previousSession = await stripe.checkout.sessions.retrieve(existing.stripe_checkout_session_id)
+        if (previousSession.status === 'open' && previousSession.url) return response.json({ url: previousSession.url })
+      }
+      await ensureSubscription(companyId, { status: 'PENDENTE', amount: MONTHLY_AMOUNT, method: 'STRIPE', subscribedAt: null, nextChargeAt: null, cancelledAt: null })
+      const baseUrl = `${String(frontendOrigin || 'http://localhost:5173').replace(/\/+$/, '')}/Nexora/`
+      const session = await stripe.checkout.sessions.create({
+        ui_mode: 'hosted_page',
+        mode: 'subscription',
+        billing_address_collection: 'auto',
+        phone_number_collection: { enabled: true },
+        automatic_tax: { enabled: false },
+        allow_promotion_codes: false,
+        payment_method_collection: 'always',
+        submit_type: 'auto',
+        name_collection: {
+          individual: { enabled: true, optional: true },
+          business: { enabled: true, optional: true },
+        },
+        integration_identifier: 'hosted_web_0001',
+        origin_context: 'web',
+        success_url: `${baseUrl}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${baseUrl}?checkout=cancelled`,
+        line_items: [{ price: stripePriceId, quantity: 1 }],
+        ...(existing?.stripe_customer_id ? { customer: existing.stripe_customer_id } : { customer_email: request.user.email }),
+        client_reference_id: companyId,
+        metadata: { company_id: companyId, nexora_subscription_id: subscriptionId },
+        subscription_data: { metadata: { company_id: companyId, nexora_subscription_id: subscriptionId } },
+      })
+      await db.run('UPDATE subscriptions SET stripe_checkout_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [session.id, subscriptionId, companyId])
+      response.status(201).json({ url: session.url })
+    } catch (error) {
+      console.error('Stripe Checkout session creation failed:', error)
+      response.status(502).json({ error: 'Não foi possível iniciar o Checkout da Stripe.' })
+    }
   })
 
   router.post('/api/subscription/checkout', auth, requireRole('ADMINISTRADOR'), requireSimulator, async (request, response) => {

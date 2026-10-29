@@ -107,15 +107,13 @@ function AppNew() {
   const prefersReducedMotion = useReducedMotion()
   const [session, setSession] = useState(() => JSON.parse(localStorage.getItem('nexora-session') || 'null'))
   const [showClientPortal, setShowClientPortal] = useState(() => Boolean(localStorage.getItem('nexora-client-portal-session')))
-  // O gate de assinatura só entra quando o build pede explicitamente (VITE_ENABLE_SIMULATED_BILLING=true);
-  // sem isso o login cai direto na conta, tanto em dev quanto em produção.
-  const billingUiEnabled = import.meta.env.VITE_ENABLE_SIMULATED_BILLING === 'true'
+  // Habilite pelo workflow do GitHub Pages quando o plano e o Checkout estiverem configurados.
+  const billingUiEnabled = import.meta.env.VITE_ENABLE_SUBSCRIPTION_GATE === 'true'
   const [billingGate, setBillingGate] = useState({ token: null, loading: false, active: false, error: '' })
   const [authView, setAuthView] = useState('login')
   const [showAuth, setShowAuth] = useState(false)
   const [showPlans, setShowPlans] = useState(false)
   const [showCheckout, setShowCheckout] = useState(false)
-  const [subscriptionMethod, setSubscriptionMethod] = useState('CARTAO')
   const [authError, setAuthError] = useState('')
   const [authInfo, setAuthInfo] = useState('')
   const [activeMenu, setActiveMenu] = useState('Visão geral')
@@ -165,14 +163,32 @@ function AppNew() {
   useEffect(() => {
     if (!session?.token || !billingUiEnabled) return undefined
     let current = true
-    fetch(`${API_URL}/subscription`, { headers: { Authorization: `Bearer ${session.token}` } })
-      .then(async (response) => {
+    let retryTimer
+    let attempts = 0
+    const returnedFromCheckout = new URLSearchParams(window.location.search).get('checkout') === 'success'
+    const checkSubscription = async () => {
+      try {
+        const response = await fetch(`${API_URL}/subscription`, { headers: { Authorization: `Bearer ${session.token}` } })
         const result = await response.json()
         if (!response.ok) throw new Error(result.error || 'Não foi possível verificar a assinatura da empresa.')
-        if (current) setBillingGate({ token: session.token, loading: false, active: result.subscription?.status === 'ATIVA', error: '' })
-      })
-      .catch((error) => { if (current) setBillingGate({ token: session.token, loading: false, active: false, error: error.message || 'Não foi possível verificar a assinatura.' }) })
-    return () => { current = false }
+        if (!current) return
+        const active = result.subscription?.status === 'ATIVA'
+        if (active) window.history.replaceState(null, '', window.location.pathname)
+        setBillingGate({ token: session.token, loading: false, active, error: '' })
+        if (!active && returnedFromCheckout && attempts < 10) {
+          attempts += 1
+          retryTimer = window.setTimeout(checkSubscription, 1500)
+        }
+      } catch (error) {
+        if (!current) return
+        if (returnedFromCheckout && attempts < 10) {
+          attempts += 1
+          retryTimer = window.setTimeout(checkSubscription, 1500)
+        } else setBillingGate({ token: session.token, loading: false, active: false, error: error.message || 'Não foi possível verificar a assinatura.' })
+      }
+    }
+    void checkSubscription()
+    return () => { current = false; window.clearTimeout(retryTimer) }
   }, [session?.token, billingUiEnabled])
 
   useEffect(() => {
@@ -290,7 +306,7 @@ function AppNew() {
     : showAuth
     ? <><button className="auth-back-button" onClick={() => { setAuthError(''); setAuthInfo(''); setShowAuth(false) }}>← Voltar à página inicial</button><AuthScreen view={authView} setView={(view) => { setAuthError(''); setAuthInfo(''); setAuthView(view) }} error={authError} info={authInfo} onLogin={handleLogin} onSignup={handleSignup} /></>
     : showCheckout
-      ? <PublicCheckoutPage onBack={() => { setShowCheckout(false); setShowPlans(true) }} onContinue={(method) => { setSubscriptionMethod(method); setAuthError(''); setAuthInfo(''); setAuthView('signup'); setShowAuth(true); setShowCheckout(false) }} onLogin={() => { setAuthError(''); setAuthView('login'); setShowAuth(true); setShowCheckout(false) }} />
+      ? <PublicCheckoutPage onBack={() => { setShowCheckout(false); setShowPlans(true) }} onContinue={() => { setAuthError(''); setAuthInfo(''); setAuthView('signup'); setShowAuth(true); setShowCheckout(false) }} onLogin={() => { setAuthError(''); setAuthView('login'); setShowAuth(true); setShowCheckout(false) }} />
       : showPlans
         ? <PublicPlansPage onBack={() => setShowPlans(false)} onSelect={() => { setShowPlans(false); setShowCheckout(true) }} onLogin={() => { setAuthError(''); setAuthView('login'); setShowAuth(true); setShowPlans(false) }} />
       : <NexoraLandingPage onRestricted={() => { setAuthError(''); setAuthView('login'); setShowAuth(true) }} onPortal={() => setShowClientPortal(true)} onSelectPlans={() => setShowPlans(true)} />
@@ -298,7 +314,7 @@ function AppNew() {
   const billingPending = billingUiEnabled && (billingGate.token !== session.token || billingGate.loading)
   const can = (module, action) => canAccess(session, module, action)
   if (billingPending) return <div className="subscription-required-shell"><img src={LOGO_URL} alt="Nexora" /><p>Verificando a assinatura da empresa…</p></div>
-  if (billingUiEnabled && !billingGate.active) return <div className="subscription-required-shell"><header><img src={LOGO_URL} alt="Nexora" /><div><strong>{session.companyName}</strong><button className="outline-button" onClick={logout}>Sair</button></div></header><main><SubscriptionPage session={session} can={can} required initialMethod={subscriptionMethod} onActivated={() => setBillingGate({ token: session.token, loading: false, active: true, error: '' })} /></main></div>
+  if (billingUiEnabled && !billingGate.active) return <div className="subscription-required-shell"><header><img src={LOGO_URL} alt="Nexora" /><div><strong>{session.companyName}</strong><button className="outline-button" onClick={logout}>Sair</button></div></header><main><SubscriptionPage session={session} can={can} required /></main></div>
 
   const normalizedQuery = query.trim().toLowerCase()
   const filteredProjects = normalizedQuery ? projects.filter((project) => `${project.name} ${project.location} ${project.code}`.toLowerCase().includes(normalizedQuery)) : projects

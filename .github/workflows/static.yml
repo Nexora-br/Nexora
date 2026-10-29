@@ -38,6 +38,7 @@ jobs:
           npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_ENABLE_SUBSCRIPTION_GATE: ${{ vars.VITE_ENABLE_SUBSCRIPTION_GATE }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

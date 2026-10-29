@@ -14,12 +14,18 @@ services:
       - key: PORT
         value: 10000
       - key: NEXORA_ENABLE_SIMULATED_BILLING
-        value: true
+        value: false
       - key: FRONTEND_ORIGIN
         value: https://nexora-br.github.io
       - key: NEXORA_JWT_SECRET
         generateValue: true
       - key: DATABASE_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PRICE_ID
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
         sync: false
       - key: SUPABASE_URL
         sync: false

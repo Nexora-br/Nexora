@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken')
 const multer = require('multer')
 const fs = require('fs')
 const path = require('path')
+const Stripe = require('stripe')
 const { createClient } = require('@supabase/supabase-js')
 const { config, buildCorsOptions } = require('./config')
 const db = require('./db')
@@ -19,6 +20,7 @@ const { admissionDocumentKeys, admissionDocuments, makePdf } = require('./admiss
 const createTeamRoutes = require('./team-routes')
 const createTaskRoutes = require('./task-routes')
 const { createSubscriptionRoutes } = require('./subscription-routes')
+const { createStripeWebhookHandler } = require('./stripe-webhook')
 const { createAiProvider } = require('./ai-provider')
 const createClientPortalRoutes = require('./client-portal-routes')
 
@@ -27,6 +29,7 @@ const port = config.port
 const isProduction = config.isProduction
 const jwtSecret = process.env.NEXORA_JWT_SECRET || (!isProduction ? 'nexora-development-secret-change-me' : (() => { throw new Error('NEXORA_JWT_SECRET deve ser configurado em produção.') })())
 const frontendOrigin = config.frontendOrigin
+const stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null
 app.disable('x-powered-by')
 if (isProduction) app.set('trust proxy', 1)
 app.use((_request, response, next) => {
@@ -39,6 +42,7 @@ app.use((_request, response, next) => {
   next()
 })
 app.use(cors(buildCorsOptions({ frontendOrigin, isProduction })))
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), createStripeWebhookHandler({ stripe, webhookSecret: process.env.STRIPE_WEBHOOK_SECRET, db }))
 app.use(express.json({ limit: '2mb' }))
 const requestWindows = new Map()
 function limitRequests({ windowMs, max, message }) {
@@ -813,7 +817,7 @@ app.use(createCrudRoutes({ db, auth, requireRole, audit }))
 app.use(createFinanceRoutes({ db, auth, requireRole, audit, id }))
 app.use(createWorkDiaryRoutes({ db, auth, requirePermission, audit, uploadRoot, supabase, ensureStorageBucket }))
 app.use(createClientPortalRoutes({ db, jwtSecret, loginRateLimit, auth, requireRole, audit, uploadRoot, supabase }))
-app.use(createSubscriptionRoutes({ express, db, auth, requirePermission, requireRole, audit, id, enabled: () => process.env.NODE_ENV === 'test' || process.env.NEXORA_ENABLE_SIMULATED_BILLING === 'true' }))
+app.use(createSubscriptionRoutes({ express, db, auth, requirePermission, requireRole, audit, id, stripe, stripePriceId: process.env.STRIPE_PRICE_ID || 'price_...', frontendOrigin, enabled: () => process.env.NODE_ENV === 'test' || process.env.NEXORA_ENABLE_SIMULATED_BILLING === 'true' }))
 
 if (require.main === module) {
   if (isProduction && !frontendOrigin) throw new Error('FRONTEND_ORIGIN deve ser configurado em produção.')
