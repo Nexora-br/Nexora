@@ -11,7 +11,7 @@ Estes valores de exemplo devem ser configurados antes de ativar o Checkout. As c
 | Campo | Valor atual | O que configurar |
 |---|---|---|
 | `STRIPE_SECRET_KEY` | `rk_test_...` | Uma chave restrita de teste da Stripe com as permissões necessárias para Checkout Sessions (criar e consultar), Prices (consultar), Customers (criar) e Subscriptions (consultar). Cadastre-a como segredo do serviço `nexora-backend` no Render. Para produção, use a chave restrita do modo ativo somente depois dos testes. |
-| `STRIPE_PRICE_ID` / `line_items[0].price` | `price_...` | O ID de um Price recorrente mensal em BRL para o produto Nexora Pro. O preço deve corresponder aos R$ 500,00 exibidos no sistema. Cadastre o valor como variável `STRIPE_PRICE_ID` no Render. |
+| `STRIPE_PRICE_ID` / `line_items[0].price` | `price_...` | O ID de um Price recorrente mensal em BRL para o produto Nexora Pro. O preço deve corresponder aos R$ 749,99 exibidos no sistema. Cadastre o valor como variável `STRIPE_PRICE_ID` no Render. |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_...` | O segredo de assinatura do endpoint de webhook da Stripe. Cadastre-o como segredo `STRIPE_WEBHOOK_SECRET` no Render. |
 
 Os endereços de retorno já usam `FRONTEND_ORIGIN` do Render e o caminho publicado `/Nexora/`:
@@ -44,8 +44,8 @@ O frontend chama o endpoint autenticado `POST /api/subscription/stripe-checkout`
 
 ## Configuração e próximos passos
 
-1. Na Stripe, crie primeiro um ambiente de testes/sandbox, um produto Nexora Pro e um preço recorrente mensal em BRL. Use esse Price ID em `STRIPE_PRICE_ID`.
-2. Crie uma chave restrita de teste com as permissões descritas na tabela acima. O endpoint valida se o Price ID está ativo, em BRL, recorrente mensal e no valor de R$ 500,00. Cadastre `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID` e `STRIPE_WEBHOOK_SECRET` nos Environment Variables do serviço backend no Render. Não envie esses segredos por chat ou commit.
+1. Na Stripe, crie primeiro um ambiente de testes/sandbox, um produto Nexora Pro e um novo preço recorrente mensal de **R$ 749,99 em BRL**. Como o valor foi alterado, crie um novo Price ID e substitua o valor antigo de `STRIPE_PRICE_ID` no Render. O preço e a chave precisam ser do mesmo modo (teste ou produção).
+2. Crie uma chave restrita de teste com as permissões descritas na tabela acima. O endpoint valida se o Price ID está ativo, em BRL, recorrente mensal e no valor de R$ 749,99. Cadastre `STRIPE_SECRET_KEY`, `STRIPE_PRICE_ID` e `STRIPE_WEBHOOK_SECRET` nos Environment Variables do serviço backend no Render. Não envie esses segredos por chat ou commit.
 3. Crie um destino de webhook no Workbench da Stripe apontando para `https://nexora-backend-w7aa.onrender.com/api/stripe/webhook`. Selecione `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` e `invoice.payment_failed`. Copie o `whsec_...` específico desse destino para o Render.
 4. No repositório GitHub, adicione a variável de Actions `VITE_ENABLE_SUBSCRIPTION_GATE=true` quando estiver pronto para mostrar a tela de assinatura no GitHub Pages. O workflow já lê essa variável. Antes de ativar o bloqueio, confira e reconcilie as assinaturas existentes para evitar bloquear empresas atuais.
 5. Teste todo o fluxo no ambiente de teste: iniciar Checkout, concluir e cancelar um pagamento, esperar o webhook, confirmar o estado no Nexora e conferir a renovação/falha de cobrança. Para assinaturas, teste também os eventos de renovação e cancelamento no Dashboard.

@@ -1,5 +1,5 @@
 const PLAN = 'NEXORA_PRO'
-const MONTHLY_AMOUNT = 500
+const MONTHLY_AMOUNT = 749.99
 const PAYMENT_METHODS = new Set(['CARTAO', 'PIX', 'BOLETO'])
 const PAYMENT_METHOD_LABELS = { CARTAO: 'Cartão', PIX: 'PIX', BOLETO: 'Boleto' }
 
@@ -74,8 +74,8 @@ function createSubscriptionRoutes({ express, db, auth, requirePermission, requir
       if (!stripe) return response.status(503).json({ error: 'Configure STRIPE_SECRET_KEY no servidor para ativar o Checkout.' })
       if (!stripePriceId || stripePriceId === 'price_...') return response.status(503).json({ error: 'Configure STRIPE_PRICE_ID com o preço mensal do Nexora Pro.' })
       const price = await stripe.prices.retrieve(stripePriceId)
-      if (!price.active || price.currency !== 'brl' || price.unit_amount !== MONTHLY_AMOUNT * 100 || price.recurring?.interval !== 'month') {
-        return response.status(400).json({ error: 'O Price ID precisa estar ativo e corresponder ao Nexora Pro mensal de R$ 500,00.' })
+      if (!price.active || price.currency !== 'brl' || price.unit_amount !== Math.round(MONTHLY_AMOUNT * 100) || price.recurring?.interval !== 'month') {
+        return response.status(400).json({ error: 'O Price ID precisa estar ativo e corresponder ao Nexora Pro mensal de R$ 749,99.' })
       }
       const companyId = request.user.company_id
       const current = await currentSubscription(companyId)

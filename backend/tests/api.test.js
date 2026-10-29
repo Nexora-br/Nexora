@@ -82,7 +82,7 @@ test('simulador inicia sem assinatura automática e isola assinaturas e pagament
   const checkout = await request(app).post('/api/subscription/checkout').set(firstHeaders).send({ method: 'CARTAO', cardNumber: 'nao-deve-ser-recebido', cvv: '123' })
   assert.equal(checkout.status, 201)
   assert.equal(checkout.body.subscription.status, 'ATIVA')
-  assert.equal(checkout.body.subscription.amount, 500)
+  assert.equal(checkout.body.subscription.amount, 749.99)
   assert.equal(checkout.body.subscription.payment_method, 'CARTAO')
   assert.ok(checkout.body.subscription.next_charge_at)
   assert.equal(checkout.body.payments[0].status, 'APROVADO')

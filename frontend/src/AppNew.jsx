@@ -608,7 +608,7 @@ function PublicPlansPage({ onBack, onSelect, onLogin }) {
   return <div className="public-plans-page">
     <header className="public-plans-header"><button className="public-plans-back" onClick={onBack}>← Voltar à apresentação</button><img src={LOGO_URL} alt="Nexora" /><button className="public-plans-login" onClick={onLogin}>Já tenho conta</button></header>
     <main className="public-plans-main"><div className="public-plans-intro"><span className="landing-section-kicker">PLANOS NEXORA</span><h1>Uma operação mais conectada começa aqui.</h1><p>Escolha seu plano, crie sua conta e finalize o pagamento com segurança pela Stripe.</p></div>
-      <section className="public-plan-card"><div className="public-plan-copy"><span className="public-plan-tag">PLANO PARA SUA EMPRESA</span><h2>Nexora Pro</h2><p>As ferramentas de gestão da Nexora para aproximar escritório, obras e equipes.</p><ul>{features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul></div><div className="public-plan-purchase"><span className="public-plan-caption">Investimento mensal</span><div className="public-plan-price">R$ 500<span>,00</span></div><span className="public-plan-period">por empresa / mês</span><button className="landing-primary" onClick={onSelect}>Continuar para cadastro <ArrowRight size={17} /></button><small>Após o cadastro ou login, você será direcionado ao Checkout da Stripe.</small><div className="public-payment-methods"><span>PAGAMENTO SEGURO</span><div><b>Stripe</b></div></div></div></section>
+      <section className="public-plan-card"><div className="public-plan-copy"><span className="public-plan-tag">PLANO PARA SUA EMPRESA</span><h2>Nexora Pro</h2><p>As ferramentas de gestão da Nexora para aproximar escritório, obras e equipes.</p><ul>{features.map((feature) => <li key={feature}><Check size={16} />{feature}</li>)}</ul></div><div className="public-plan-purchase"><span className="public-plan-caption">Investimento mensal</span><div className="public-plan-price">R$ 749<span>,99</span></div><span className="public-plan-period">por empresa / mês</span><button className="landing-primary" onClick={onSelect}>Continuar para cadastro <ArrowRight size={17} /></button><small>Após o cadastro ou login, você será direcionado ao Checkout da Stripe.</small><div className="public-payment-methods"><span>PAGAMENTO SEGURO</span><div><b>Stripe</b></div></div></div></section>
       <div className="public-plan-note"><ShieldCheck size={17} /><p>O pagamento e a cobrança recorrente são processados pela Stripe. Os dados do cartão são informados somente na página segura de pagamento.</p></div>
       <p className="public-plan-existing">Já tem cadastro? <button onClick={onLogin}>Acesse sua conta</button></p>
     </main><footer className="public-plans-footer">© {new Date().getFullYear()} Nexora · Gestão conectada ao campo</footer>
@@ -641,7 +641,7 @@ function PublicCheckoutPage({ onBack, onContinue, onLogin }) {
 
   return <div className="public-plans-page">
     <header className="public-plans-header"><button className="public-plans-back" onClick={onBack}>← Voltar ao plano</button><img src={LOGO_URL} alt="Nexora" /><button className="public-plans-login" onClick={onLogin}>Já tenho conta</button></header>
-    <main className="public-checkout-main"><div className="public-plans-intro"><span className="landing-section-kicker">FINALIZAÇÃO DO PLANO</span><h1>Escolha como deseja pagar.</h1><p>Nexora Pro · R$ 500,00 por mês</p></div>
+    <main className="public-checkout-main"><div className="public-plans-intro"><span className="landing-section-kicker">FINALIZAÇÃO DO PLANO</span><h1>Escolha como deseja pagar.</h1><p>Nexora Pro · R$ 749,99 por mês</p></div>
       <form className="public-checkout-card" onSubmit={continueToSignup}>
         <div className="public-checkout-methods" role="radiogroup" aria-label="Forma de pagamento">
           {[['CARTAO', 'Cartão'], ['PIX', 'PIX'], ['BOLETO', 'Boleto']].map(([value, label]) => <label className={`public-method-option ${method === value ? 'selected' : ''}`} key={value}><input type="radio" name="payment-method" value={value} checked={method === value} onChange={() => { setMethod(value); setError('') }} /><span>{label}</span></label>)}
@@ -650,7 +650,7 @@ function PublicCheckoutPage({ onBack, onContinue, onLogin }) {
         {method === 'PIX' && <div className="public-checkout-info"><strong>PIX demonstrativo</strong><p>O pagamento será apenas simulado depois do cadastro. Nenhuma transferência ou cobrança será feita.</p></div>}
         {method === 'BOLETO' && <div className="public-checkout-info"><strong>Boleto demonstrativo</strong><p>Nenhum boleto real será emitido. A aprovação será simulada depois do cadastro.</p></div>}
         {error && <p className="public-checkout-error" role="alert">{error}</p>}
-        <div className="public-checkout-total"><span>Total mensal</span><strong>R$ 500,00</strong></div>
+        <div className="public-checkout-total"><span>Total mensal</span><strong>R$ 749,99</strong></div>
         <button className="landing-primary public-checkout-submit" type="submit">Continuar para cadastro <ArrowRight size={17} /></button>
         <p className="public-checkout-disclaimer"><ShieldCheck size={15} />Simulador de desenvolvimento. Não digite dados reais. Nenhuma informação de cartão é enviada, armazenada ou cobrada.</p>
       </form>

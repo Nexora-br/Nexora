@@ -6,7 +6,7 @@ const statusLabels = { ATIVA: 'Ativa', PENDENTE: 'Pendente', CANCELADA: 'Cancela
 const methodLabels = { CARTAO: 'Cartão (simulação)', PIX: 'PIX (simulação)', BOLETO: 'Boleto (simulação)', STRIPE: 'Stripe Checkout' }
 const dateLabel = (value) => value ? new Date(value).toLocaleDateString('pt-BR') : '—'
 const moneyLabel = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const fallbackPlan = { name: 'Nexora Pro', amount: 500 }
+const fallbackPlan = { name: 'Nexora Pro', amount: 749.99 }
 const unavailableMessage = 'O servidor de assinaturas da Nexora ainda não está atualizado ou está indisponível. Tente novamente em alguns minutos.'
 
 async function readApiResponse(response) {
