@@ -5,15 +5,14 @@ Este módulo é exclusivamente para desenvolvimento e testes. Não se conecta a 
 ## Ativação
 
 - Local: execute o backend normalmente e use o Vite em modo de desenvolvimento. As rotas da API são habilitadas em `NODE_ENV=test` ou com `NEXORA_ENABLE_SIMULATED_BILLING=true`.
-- A apresentação pública possui telas próprias de planos e checkout: “Selecionar planos” mostra Nexora Pro (R$ 500,00/mês); “Selecionar plano” abre a escolha entre cartão, PIX e boleto demonstrativos antes do cadastro. O cadastro leva à etapa de ativação simulada antes do workspace.
+- A contratação pública apresenta o Nexora Pro (R$ 749,99/mês), solicita cadastro/login e usa o Checkout hospedado da Stripe. O formulário antigo de cartão fictício não participa do fluxo público.
 - Em build publicado, configure `VITE_ENABLE_SIMULATED_BILLING=true` durante o build para habilitar a etapa de ativação e o bloqueio do workspace. Habilite também `NEXORA_ENABLE_SIMULATED_BILLING=true` no backend.
-- A API barra as demais rotas enquanto a simulação estiver ativada. Só o administrador da empresa pode confirmar a simulação; todos os usuários da empresa passam pela verificação de assinatura.
-- `NEXORA_ENFORCE_SUBSCRIPTIONS=true` também ativa o bloqueio da API, mesmo sem habilitar as rotas do simulador. Administradores são liberados sem assinatura apenas em `NODE_ENV=test`.
-- O bloqueio e o checkout fictício ficam desativados por padrão fora do desenvolvimento/testes. Não habilite o simulador como mecanismo de cobrança de clientes: ele não realiza cobrança real.
+- O simulador só deve ser usado em desenvolvimento e testes; não habilite-o como mecanismo de cobrança de clientes, pois não realiza cobrança real.
+- No backend, usuários autenticados sem assinatura ativa podem consultar os dados, mas não podem criar, editar ou excluir registros. A exceção operacional é `nexoraatendimentosuporte@gmail.com`. Login, leitura e gerenciamento da assinatura continuam disponíveis para regularização.
 
 ## Comportamento
 
-O plano é Nexora Pro, R$ 500,00 por mês. Cada assinatura e evento de pagamento fica associado à empresa da sessão autenticada. O servidor ignora `company_id` enviado pelo cliente e só permite as simulações administrativas a usuários com perfil `ADMINISTRADOR`. Empresas novas não recebem uma assinatura automática. Registros antigos criados automaticamente, sem eventos de pagamento, são tratados como ausência de assinatura.
+O plano é Nexora Pro, R$ 749,99 por mês. Cada assinatura e evento de pagamento fica associado à empresa da sessão autenticada. O servidor ignora `company_id` enviado pelo cliente e só permite as simulações administrativas a usuários com perfil `ADMINISTRADOR`. Empresas novas não recebem uma assinatura automática. Registros antigos criados automaticamente, sem eventos de pagamento, são tratados como ausência de assinatura.
 
 Rotas: `GET /api/subscription`, `POST /api/subscription/checkout` e `POST /api/subscription/admin-action`. As ações administrativas aceitas são `CRIAR_COBRANCA`, `APROVAR_PAGAMENTO`, `RECUSAR_PAGAMENTO`, `CANCELAR`, `RENOVAR` e `EXPIRAR`.
 

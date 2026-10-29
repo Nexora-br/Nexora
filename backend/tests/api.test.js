@@ -91,7 +91,7 @@ test('simulador inicia sem assinatura automática e isola assinaturas e pagament
   assert.equal((await database.get('SELECT COUNT(*) AS count FROM subscription_payments WHERE company_id = ?', [second.company.id])).count, 0)
 })
 
-test('verificação opcional identifica empresas sem assinatura sem bloquear o administrador', async () => {
+test('empresa sem assinatura pode consultar, mas não pode alterar dados', async () => {
   const session = await register('Empresa Verificacao Plano')
   const role = await database.get('SELECT id FROM roles WHERE name = ?', ['GESTOR'])
   const userId = crypto.randomUUID()
@@ -100,19 +100,10 @@ test('verificação opcional identifica empresas sem assinatura sem bloquear o a
   await database.run('INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)', [userId, role.id])
   const login = await request(app).post('/api/auth/login').send({ email, password: 'senha123' })
   assert.equal(login.status, 200)
-  const original = process.env.NEXORA_ENFORCE_SUBSCRIPTIONS
-  const originalSimulator = process.env.NEXORA_ENABLE_SIMULATED_BILLING
-  process.env.NEXORA_ENFORCE_SUBSCRIPTIONS = 'true'
-  try {
-    assert.equal((await request(app).get('/api/projects').set('Authorization', `Bearer ${login.body.token}`)).status, 402)
-    assert.equal((await request(app).get('/api/projects').set('Authorization', `Bearer ${session.token}`)).status, 200)
-    assert.equal((await request(app).get('/api/subscription').set('Authorization', `Bearer ${login.body.token}`)).status, 200)
-  } finally {
-    if (original === undefined) delete process.env.NEXORA_ENFORCE_SUBSCRIPTIONS
-    else process.env.NEXORA_ENFORCE_SUBSCRIPTIONS = original
-    if (originalSimulator === undefined) delete process.env.NEXORA_ENABLE_SIMULATED_BILLING
-    else process.env.NEXORA_ENABLE_SIMULATED_BILLING = originalSimulator
-  }
+  const headers = { Authorization: `Bearer ${login.body.token}` }
+  assert.equal((await request(app).get('/api/projects').set(headers)).status, 200)
+  assert.equal((await request(app).post('/api/projects').set(headers).send({ name: 'Obra bloqueada' })).status, 402)
+  assert.equal((await request(app).get('/api/subscription').set(headers)).status, 200)
 })
 
 test('administrador pode simular pendência, aprovação, recusa, renovação, cancelamento e expiração', async () => {
