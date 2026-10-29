@@ -132,6 +132,7 @@ function AppNew() {
   const [showSupplyModal, setShowSupplyModal] = useState(false)
   const [showPurchaseRequestModal, setShowPurchaseRequestModal] = useState(false)
   const [toast, setToast] = useState('')
+  const [subscriptionNotice, setSubscriptionNotice] = useState('')
   const [projects, setProjects] = useState([])
   const [supplies, setSupplies] = useState([])
   const [dataError, setDataError] = useState('')
@@ -160,6 +161,37 @@ function AppNew() {
   const [activities, setActivities] = useState([])
   const [documents, setDocuments] = useState([])
   const [dashboardData, setDashboardData] = useState(null)
+
+  useEffect(() => {
+    const originalFetch = window.fetch
+    if (!originalFetch) return undefined
+    let mounted = true
+    const apiBase = new URL(API_URL, window.location.href)
+    const apiPath = apiBase.pathname.replace(/\/+$/, '') || '/'
+    const subscriptionAwareFetch = async (...args) => {
+      const response = await originalFetch.apply(window, args)
+      if (response.status === 402) {
+        try {
+          const input = args[0]
+          const requestUrl = typeof input === 'string' ? input : input?.url || input?.href
+          if (requestUrl) {
+            const url = new URL(requestUrl, window.location.href)
+            const isApiRequest = url.origin === apiBase.origin && (url.pathname === apiPath || url.pathname.startsWith(`${apiPath}/`))
+            if (mounted && isApiRequest) {
+              const result = await response.clone().json().catch(() => null)
+              if (result?.code === 'SUBSCRIPTION_REQUIRED') setSubscriptionNotice(result.error || 'A assinatura mensal está atrasada ou inativa. Regularize o pagamento para voltar a salvar alterações.')
+            }
+          }
+        } catch { /* A resposta original continua disponível para o fluxo que iniciou a solicitação. */ }
+      }
+      return response
+    }
+    window.fetch = subscriptionAwareFetch
+    return () => {
+      mounted = false
+      if (window.fetch === subscriptionAwareFetch) window.fetch = originalFetch
+    }
+  }, [])
 
   useEffect(() => {
     if (!session?.token || !billingUiEnabled) return undefined
@@ -404,6 +436,7 @@ function AppNew() {
     {showSupplyModal && <StockMovementModal supplies={supplies} projects={projects} onClose={() => setShowSupplyModal(false)} onSubmit={recordInventoryMovement} />}
     {showPurchaseRequestModal && <PurchaseRequestModal projects={projects} onClose={() => setShowPurchaseRequestModal(false)} onCreate={createPurchaseRequest} />}
     {toast && <div className="toast"><Check size={17} />{toast}</div>}
+    {subscriptionNotice && <div className="modal-layer subscription-notice-layer" onClick={() => setSubscriptionNotice('')}><section className="modal-card subscription-notice-card" role="alertdialog" aria-modal="true" aria-labelledby="subscription-notice-title" onClick={(event) => event.stopPropagation()}><button type="button" className="modal-x" aria-label="Fechar aviso" onClick={() => setSubscriptionNotice('')}><X size={18} /></button><span className="subscription-notice-icon"><ShieldCheck size={24} /></span><span className="section-kicker">ACESSO SOMENTE PARA CONSULTA</span><h2 id="subscription-notice-title">Assinatura atrasada</h2><p>{subscriptionNotice}</p><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setSubscriptionNotice('')}>Fechar</button><button type="button" className="blue-button" onClick={() => { setSubscriptionNotice(''); setActiveMenu('Assinaturas'); setSidebarOpen(false) }}>Ir para Assinaturas</button></div></section></div>}
   </div>
 }
 

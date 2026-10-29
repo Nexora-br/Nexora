@@ -137,7 +137,7 @@ async function enforceSubscriptionWriteAccess(request, response, next) {
   if (readOnlyMethod || isSupportAccount || (process.env.NODE_ENV === 'test' && request.user.role === 'ADMINISTRADOR')) return next()
   try {
     const active = await db.get("SELECT id FROM subscriptions WHERE company_id = ? AND stripe_subscription_id IS NOT NULL AND status = 'ATIVA' AND next_charge_at > ?", [request.user.company_id, new Date().toISOString()])
-    if (!active) return response.status(402).json({ error: 'A assinatura mensal está vencida ou inativa. Você pode visualizar os dados existentes e acessar Assinaturas para regularizar o pagamento.' })
+    if (!active) return response.status(402).json({ code: 'SUBSCRIPTION_REQUIRED', error: 'A assinatura mensal está vencida ou inativa. Você pode visualizar os dados existentes e acessar Assinaturas para regularizar o pagamento.' })
     next()
   } catch (error) { console.error(error); response.status(503).json({ error: 'Não foi possível verificar a assinatura da empresa.' }) }
 }
