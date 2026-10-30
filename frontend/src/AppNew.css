@@ -874,8 +874,6 @@ html, body, #root { width:100%; max-width:100%; overflow-x:clip; }
 .portal-user-create { display: grid; gap: 5px; padding: 14px; background: #f7fafc; border-radius: 8px; }.portal-user-create .field { margin: 8px 0; }.portal-user-create small, .portal-user-list small { color: #64748b; }.portal-user-list { display: grid; gap: 8px; margin: 16px 0; }.portal-user-list > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid #edf1f5; }.portal-user-list > div > span:first-child { display: grid; gap: 4px; }.portal-user-actions { display: flex; gap: 8px; }.portal-user-message { padding: 12px 16px; color: #246540; background: #effaf2; border-radius: 8px; }
 .client-portal-access-intro { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px; margin-bottom: 16px; color: #315c82; }.client-portal-access-intro p { margin: 0; color: #52657a; }
 @media (max-width: 760px) { .client-portal-shell { padding-inline: 14px; }.client-portal-header { min-height: 70px; gap: 8px; }.client-portal-header > div { gap: 8px; }.client-portal-header img { width: 88px; }.client-portal-header > div span { font-size: 9px; }.client-portal-header p { font-size: 12px; }.client-portal-header .outline-button { padding: 8px; }.client-portal-layout { grid-template-columns: 1fr; }.client-portal-projects { position: static; }.client-portal-projects > button { display: inline-grid; width: auto; min-width: 180px; }.client-portal-projects { overflow-x: auto; white-space: nowrap; }.client-portal-stages > div { align-items: flex-start; }.client-portal-diary-details dl { grid-template-columns: 1fr; }.landing-header-actions { gap: 6px; }.landing-portal-link { font-size: 10px; padding: 8px 2px; } }
-.sidebar-legal-links { display:grid; gap:5px; margin:12px 7px 0; padding:12px 8px; border-top:1px solid #397391; border-bottom:1px solid #397391; }
-.sidebar-legal-links a { color:#b5d6e2; font-size:9px; line-height:1.5; text-underline-offset:2px; }
 .landing-legal-links { grid-column:1 / -1; justify-content:center; }
 .public-legal-links { justify-content:center; margin-top:14px; }
 .public-legal-links a,.landing-legal-links a { color:inherit; }
@@ -893,3 +891,16 @@ html, body, #root { width:100%; max-width:100%; overflow-x:clip; }
 .skip-to-main:focus { transform:translateY(0); }
 *:focus-visible { outline:3px solid #087ea4 !important; outline-offset:3px !important; }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
+
+/* Legal documents are grouped under the account settings instead of the global sidebar. */
+.legal-settings-panel { padding: 24px; }
+.legal-settings-intro h2 { margin: 8px 0 6px; color: #244d63; font-size: 21px; }
+.legal-settings-intro p { max-width: 720px; margin: 0; color: #7894a1; font-size: 12px; line-height: 1.65; }
+.legal-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 12px; margin: 22px 0; }
+.legal-settings-card { display: flex; min-height: 112px; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid #deedf3; border-radius: 13px; color: inherit; background: #fbfdfe; text-decoration: none; transition: border-color .18s, box-shadow .18s, transform .18s; }
+.legal-settings-card:hover, .legal-settings-card:focus-visible { transform: translateY(-2px); border-color: #8dcbd9; box-shadow: 0 8px 22px #17466012; outline: none; }
+.legal-settings-card strong { color: #28566e; font-size: 13px; }
+.legal-settings-card span { color: #7894a1; font-size: 11px; line-height: 1.5; }
+.legal-settings-card small { margin-top: auto; color: #287f9f; font-size: 10px; font-weight: 700; }
+.legal-settings-consent { max-width: 760px; margin: 18px 0 0; padding: 15px; border: 1px solid #deedf3; border-radius: 12px; background: #f6fbfd; font-size: 12px; }
+.admin-terms-hint { margin: 0 0 16px; color: #7894a1; font-size: 11px; line-height: 1.5; }

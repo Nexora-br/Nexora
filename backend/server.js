@@ -401,9 +401,20 @@ const TERMS_VERSION = '2026-10-29'
 
 app.post('/api/legal/accept-terms', auth, async (request, response) => {
   try {
+    if (request.body?.accepted === false) {
+      await db.run('UPDATE users SET terms_accepted_at = NULL, terms_version = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [request.user.id, request.user.company_id])
+      return response.json({ ok: true, accepted: false })
+    }
     const acceptedAt = new Date().toISOString()
     await db.run('UPDATE users SET terms_accepted_at = ?, terms_version = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND company_id = ?', [acceptedAt, TERMS_VERSION, request.user.id, request.user.company_id])
-    response.json({ ok: true, termsVersion: TERMS_VERSION, acceptedAt })
+    response.json({ ok: true, accepted: true, termsVersion: TERMS_VERSION, acceptedAt })
+  } catch (error) { errorResponse(response, error) }
+})
+
+app.get('/api/legal/terms-status', auth, async (request, response) => {
+  try {
+    const user = await db.get('SELECT terms_accepted_at, terms_version FROM users WHERE id = ? AND company_id = ?', [request.user.id, request.user.company_id])
+    response.json({ accepted: Boolean(user?.terms_accepted_at && user.terms_version === TERMS_VERSION), termsVersion: user?.terms_version || null, acceptedAt: user?.terms_accepted_at || null })
   } catch (error) { errorResponse(response, error) }
 })
 
